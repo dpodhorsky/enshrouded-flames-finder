@@ -6,7 +6,7 @@ import flameIconUrl from "./assets/flame-shrine.png";
 import mapImageUrl from "./assets/map.webp";
 import { locationsOfRegion, regions } from "./locations.ts";
 import { LoreIcon } from "./lore-icon.tsx";
-import { activeLayer, activePins, foundIds, isShown, selectedPin, selectPin, stateOf, stepBy, stepPins, type Pin } from "./state.ts";
+import { activeLayer, activePins, foundIds, groupOf, isShown, selectedPin, selectPin, stateOf, stepBy, stepPins, type Pin } from "./state.ts";
 import {
   clampWidth,
   flyTo,
@@ -213,7 +213,7 @@ function Tooltip({ hover, frameRef }: { hover: Signal<Hover | null>; frameRef: R
       class="floating pointer-events-none absolute z-2 grid gap-1 rounded-lg px-3 py-2 text-[13px] leading-4.5 font-medium whitespace-nowrap text-primary"
     >
       <small class="mono-caption">
-        {current.pin.group}
+        {groupOf(current.pin)}
         {state === "unknown" ? "" : ` · ${state}`}
       </small>
       {current.pin.title}
@@ -351,7 +351,7 @@ function Popover() {
   return (
     <div class="floating menu-in absolute bottom-3 left-3 z-3 grid w-[min(340px,calc(100%-24px))] gap-3 rounded-[18px] p-4">
       <div class="flex items-center justify-between gap-2">
-        <span class="mono-caption">{selected.group}</span>
+        <span class="mono-caption">{selected.page ? `${selected.page.region} · ${selected.page.category}` : selected.group}</span>
         <button class="btn btn-ghost btn-icon -my-1.5 -mr-2" aria-label="Close" onClick={() => selectPin(null, false)}>
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
             <path d="M4 4l8 8M12 4l-8 8" />
@@ -486,6 +486,10 @@ export function MapView() {
             · Lore{" "}
             <a class="underline" href="https://github.com/nicolasferreiraxn/Enshrouded-Interactive-Map" target="_blank" rel="noopener">
               Enshrouded Interactive Map
+            </a>{" "}
+            · Regions{" "}
+            <a class="underline" href="https://allthings.how/enshrouded/map/" target="_blank" rel="noopener">
+              All Things How
             </a>
           </>
         )}

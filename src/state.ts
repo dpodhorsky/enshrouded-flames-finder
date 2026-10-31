@@ -1,13 +1,14 @@
 import { batch, computed, signal } from "@preact/signals";
 
 import { orderedLocations, shortName, type LocationKind } from "./locations.ts";
-import { lorePages, type LorePage } from "./lore.ts";
+import { loreCategories, lorePages, loreRegions, type LorePage } from "./lore.ts";
 import { readKnowledge } from "./save.ts";
 import { flyTo, toMapX, toMapY, view } from "./viewport.ts";
 
 export type LocationState = "unknown" | "found" | "missing";
 export type ListMode = "missing" | "all";
 export type Layer = "flames" | "lore";
+export type LoreGrouping = "region" | "journal";
 
 // A pin is one marker on the map and one row in the list.
 export type Pin = {
@@ -80,6 +81,7 @@ export const selectedPin = signal<Pin | null>(null);
 export const errorMessage = signal("");
 export const listMode = signal<ListMode>("all");
 export const loreQuery = signal("");
+export const loreGrouping = signal<LoreGrouping>("region");
 export const visibleKinds = signal<Record<LocationKind, boolean>>({
   shrine: true,
   sanctum: true,
@@ -95,7 +97,7 @@ export function stateOf(pin: Pin): LocationState {
 }
 
 const matchesQuery = (pin: Pin, query: string) =>
-  !query || [pin.title, pin.group, pin.page?.collection ?? ""].some((text) => text.toLowerCase().includes(query));
+  !query || [pin.title, pin.group, pin.page?.region ?? "", pin.page?.collection ?? ""].some((text) => text.toLowerCase().includes(query));
 
 export function isShown(pin: Pin) {
   if (pin.layer !== activeLayer.value || (listMode.value === "missing" && stateOf(pin) === "found")) {
@@ -105,7 +107,20 @@ export function isShown(pin: Pin) {
   return pin.layer === "flames" ? visibleKinds.value[pin.kind!] : matchesQuery(pin, loreQuery.value.trim().toLowerCase());
 }
 
-export const activePins = computed(() => pinsOf(activeLayer.value));
+// Flames group by region. Lore groups by region or by the journal category the game files it under.
+export const groupOf = (pin: Pin) => (pin.page && loreGrouping.value === "region" ? pin.page.region : pin.group);
+
+const groupOrder = (pin: Pin) =>
+  pin.page
+    ? loreGrouping.value === "region"
+      ? (loreRegions as readonly string[]).indexOf(pin.page.region)
+      : (loreCategories as readonly string[]).indexOf(pin.page.category)
+    : 0;
+
+export const activePins = computed(() => {
+  const pins = pinsOf(activeLayer.value);
+  return activeLayer.value === "lore" ? pins.toSorted((first, second) => groupOrder(first) - groupOrder(second)) : pins;
+});
 
 export const shownPins = computed(() => activePins.value.filter(isShown));
 

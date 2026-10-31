@@ -13,8 +13,10 @@ import {
   forgetSave,
   foundCount,
   foundIds,
+  groupOf,
   listMode,
   loadSave,
+  loreGrouping,
   loreQuery,
   pickSaveFile,
   saveTracksLore,
@@ -26,6 +28,7 @@ import {
   visibleKinds,
   type Layer,
   type ListMode,
+  type LoreGrouping,
   type Pin,
 } from "./state.ts";
 
@@ -48,6 +51,17 @@ const listModes: { value: ListMode; label: string }[] = [
   {
     value: "all",
     label: "All",
+  },
+];
+
+const loreGroupings: { value: LoreGrouping; label: string }[] = [
+  {
+    value: "region",
+    label: "By region",
+  },
+  {
+    value: "journal",
+    label: "By journal",
   },
 ];
 
@@ -222,14 +236,17 @@ function Filters() {
           ))}
         </div>
       ) : (
-        <input
-          class="search"
-          type="search"
-          placeholder="Search lore pages"
-          aria-label="Search lore pages"
-          value={loreQuery.value}
-          onInput={(event) => (loreQuery.value = event.currentTarget.value)}
-        />
+        <>
+          <Track label="Group" options={loreGroupings} value={loreGrouping.value} onChange={(value) => (loreGrouping.value = value)} />
+          <input
+            class="search"
+            type="search"
+            placeholder="Search lore pages"
+            aria-label="Search lore pages"
+            value={loreQuery.value}
+            onInput={(event) => (loreQuery.value = event.currentTarget.value)}
+          />
+        </>
       )}
     </div>
   );
@@ -259,7 +276,7 @@ function Sidebar() {
           <p class="px-4 py-6 text-[13px] leading-4.5 text-muted">{emptyText()}</p>
         ) : (
           <div class="p-1.5">
-            {[...Map.groupBy(rows, (pin) => pin.group)].map(([group, groupRows]) => (
+            {[...Map.groupBy(rows, groupOf)].map(([group, groupRows]) => (
               <section key={group} aria-label={group}>
                 <h2 class="menu-label mono-caption">
                   <span>{group}</span>

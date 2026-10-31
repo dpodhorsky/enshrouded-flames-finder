@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, test } from "vitest";
 
 import { locations } from "./locations.ts";
-import { lorePages } from "./lore.ts";
+import { lorePages, loreRegions } from "./lore.ts";
 import { readKnowledge } from "./save.ts";
 
 const fixtures = new URL("fixtures/", import.meta.url);
@@ -54,6 +54,7 @@ describe("lore pages", () => {
       expect(page.title).not.toBe("");
       expect(page.east).toBeGreaterThan(0);
       expect(page.north).toBeGreaterThan(0);
+      expect(loreRegions).toContain(page.region);
     }
   });
 });

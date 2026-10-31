@@ -2,7 +2,7 @@
 
 A map of the Flame Shrines and lore pages in Enshrouded. Drop a `characterN.ksd` save file on the page to see which shrines you have found and which lore pages you have read, and which ones you have yet to discover.
 
-Switch between the **Flames** and **Lore** layers in the sidebar. The lore layer lists 517 pages grouped by journal category, with a search box and a hint for where each page is. 45 of those pages have no known save id yet, so a save cannot tell whether they are read. They always show as not checked.
+Switch between the **Flames** and **Lore** layers in the sidebar. The lore layer lists 517 pages across all eight regions (Springlands, Revelwood, Nomad Highlands, Blackmire, Albaneve Summits, Kindlewastes, Veilwater Basin and Cinder's Cradle), grouped by region or by journal category, with a search box and a hint for where each page is. 45 of those pages have no known save id yet, so a save cannot tell whether they are read. They always show as not checked.
 
 ## Where to find the character save
 
@@ -19,11 +19,12 @@ More information: [Enshrouded save management](https://saraserenity.net/enshroud
 
 ## Lore data
 
-`src/lore.ts` is generated from `app/public/data.json` of the [Enshrouded Interactive Map](https://github.com/nicolasferreiraxn/Enshrouded-Interactive-Map) (MIT), whose data comes from the game files of Keen Games. To refresh it:
+`src/lore.ts` is generated from `app/public/data.json` of the [Enshrouded Interactive Map](https://github.com/nicolasferreiraxn/Enshrouded-Interactive-Map) (MIT), whose data comes from the game files of Keen Games. The region of each page is the region of the nearest lore pin on the [All Things How map](https://allthings.how/enshrouded/map/). To refresh it:
 
 ```sh
 git clone --depth 1 https://github.com/nicolasferreiraxn/Enshrouded-Interactive-Map /tmp/eim
-bun scripts/import-lore.ts /tmp/eim/app/public/data.json
+curl -o /tmp/regions.json https://static.allthings.how/game-maps/enshrouded/embervale/points/lore.json
+bun scripts/import-lore.ts /tmp/eim/app/public/data.json /tmp/regions.json
 bun run format
 ```
 
