@@ -65,8 +65,39 @@ function TopBar() {
             Load save
           </button>
         )}
+        <button class="btn btn-glass btn-sm btn-icon" popovertarget="save-help" aria-label="Where to find the save file">
+          ?
+        </button>
+        <SaveHelp />
       </div>
     </header>
+  );
+}
+
+function SaveHelp() {
+  return (
+    <div id="save-help" popover class="save-help floating menu-in">
+      <h2 class="mb-2 text-sm font-semibold text-primary">Where to find your save</h2>
+      <p class="mb-2">
+        Load a <code>characterN.ksd</code> file. A <code>worldN.ksd</code> file does not hold character data.
+      </p>
+      <ul class="mb-2 grid list-disc gap-1.5 pl-4">
+        <li>
+          <strong class="text-primary">Steam Cloud on (default):</strong> <code>&lt;Steam folder&gt;\userdata\&lt;YOUR_STEAM_ID&gt;\1203620</code>, or download
+          it from your{" "}
+          <a href="https://store.steampowered.com/account/remotestorageapp/?appid=1203620" target="_blank" rel="noreferrer">
+            Steam Cloud storage
+          </a>
+          .
+        </li>
+        <li>
+          <strong class="text-primary">Steam Cloud off:</strong> <code>%userprofile%\Saved Games\Enshrouded</code>
+        </li>
+      </ul>
+      <a href="https://saraserenity.net/enshrouded/manage_saves.php?action=general#save_location" target="_blank" rel="noreferrer">
+        More information
+      </a>
+    </div>
   );
 }
 

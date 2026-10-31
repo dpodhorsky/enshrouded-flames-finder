@@ -324,6 +324,30 @@
     }
   }
 
+  .save-help {
+    position: fixed;
+    inset: 60px 16px auto auto;
+    width: min(380px, calc(100vw - 32px));
+    margin: 0;
+    padding: 16px;
+    border: 0;
+    border-radius: var(--radius-lg);
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 18px;
+
+    & code {
+      font: 12px var(--font-mono);
+      overflow-wrap: anywhere;
+      color: var(--text-primary);
+    }
+
+    & a {
+      color: var(--text-primary);
+      text-decoration: underline;
+    }
+  }
+
   .menu-in {
     animation: menu-in var(--duration-normal) var(--ease-out) both;
   }
