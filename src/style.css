@@ -291,6 +291,22 @@
     }
   }
 
+  .chip-sm {
+    height: 26px;
+    padding: 0 9px;
+    font-size: 12px;
+  }
+
+  .place-types {
+    max-height: 40vh;
+    overflow-y: auto;
+
+    & summary {
+      cursor: pointer;
+      padding: 4px 2px;
+    }
+  }
+
   .search {
     height: 32px;
     padding: 0 14px;
@@ -389,6 +405,12 @@
   stroke-opacity: 0.7;
   paint-order: stroke;
   pointer-events: none;
+}
+
+/* One image for the whole explored grid. Smoothing keeps the 8 m cells from looking blocky. */
+.fog {
+  pointer-events: none;
+  image-rendering: auto;
 }
 
 .marker {

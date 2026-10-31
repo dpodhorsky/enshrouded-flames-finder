@@ -6,7 +6,8 @@ import flameIconUrl from "./assets/flame-shrine.png";
 import mapImageUrl from "./assets/map.webp";
 import { locationsOfRegion, regions } from "./locations.ts";
 import { LoreSymbols } from "./lore-icon.tsx";
-import { activeLayer, activePins, foundIds, groupOf, isShown, selectedPin, selectPin, stateOf, stepBy, stepPins, type Pin } from "./state.ts";
+import { usePlaceCanvas } from "./place-canvas.tsx";
+import { activeLayer, activePins, fogUrl, foundIds, groupOf, isShown, selectedPin, selectPin, showFog, stateOf, stepBy, stepPins, type Pin } from "./state.ts";
 import {
   clampWidth,
   flyTo,
@@ -42,6 +43,7 @@ type Gesture = { kind: "pan"; start: Point; startView: View } | { kind: "pinch";
 
 const markerSize = 24;
 const loreMarkerSize = 18;
+const placeMarkerSize = 22;
 const numberFormat = new Intl.NumberFormat("en");
 const stateWords = {
   missing: "Missing",
@@ -221,16 +223,31 @@ function Tooltip({ hover, frameRef }: { hover: Signal<Hover | null>; frameRef: R
   );
 }
 
+// Blackmire and Cinder's Cradle have no flame shrines to centre a label on. These spots are the region label points of the
+// All Things How map (https://allthings.how/enshrouded/map/).
+const shrinelessRegions = [
+  { region: "Blackmire", east: 3413, north: 5740 },
+  { region: "Cinder's Cradle", east: 6842, north: 8899 },
+];
+
+const regionLabels = [
+  ...regions.map((region) => {
+    const regionLocations = locationsOfRegion(region);
+    return {
+      region,
+      east: regionLocations.reduce((sum, location) => sum + location.east, 0) / regionLocations.length,
+      north: regionLocations.reduce((sum, location) => sum + location.north, 0) / regionLocations.length,
+    };
+  }),
+  ...shrinelessRegions,
+];
+
 function RegionLabels() {
   return (
     <g>
-      {regions.map((region) => {
-        const regionLocations = locationsOfRegion(region);
-        const centerEast = regionLocations.reduce((sum, location) => sum + location.east, 0) / regionLocations.length;
-        const centerNorth = regionLocations.reduce((sum, location) => sum + location.north, 0) / regionLocations.length;
-
+      {regionLabels.map(({ region, east, north }) => {
         return (
-          <g key={region} transform={`translate(${toMapX(centerEast)} ${toMapY(centerNorth)})`}>
+          <g key={region} transform={`translate(${toMapX(east)} ${toMapY(north)})`}>
             <g transform={markerScale}>
               <text class="region-label" text-anchor="middle" y={4}>
                 {region}
@@ -245,7 +262,8 @@ function RegionLabels() {
 
 function Markers({ hover, moved }: { hover: Signal<Hover | null>; moved: RefObject<boolean> }) {
   const selected = selectedPin.value;
-  const pins = activePins.value;
+  // Places are drawn on a canvas (place-canvas.tsx). Only the selected place is an SVG marker, for its ring.
+  const pins = activeLayer.value === "places" ? (selected ? [selected] : []) : activePins.value;
   // Missing markers draw above the other markers, and the selected marker draws above all.
   const ordered = [
     ...pins.filter((pin) => stateOf(pin) !== "missing" && pin !== selected),
@@ -279,7 +297,7 @@ function Markers({ hover, moved }: { hover: Signal<Hover | null>; moved: RefObje
       {ordered.map((pin) => {
         const state = stateOf(pin);
         const classes = ["marker", state, pin === selected && "selected", !isShown(pin) && pin !== selected && "hidden-marker"];
-        const size = pin.layer === "lore" ? loreMarkerSize : markerSize;
+        const size = pin.layer === "flames" ? markerSize : pin.layer === "lore" ? loreMarkerSize : placeMarkerSize;
 
         return (
           <g
@@ -299,6 +317,8 @@ function Markers({ hover, moved }: { hover: Signal<Hover | null>; moved: RefObje
               <circle class="ring" r={size / 2 + 3} />
               {pin.layer === "lore" ? (
                 <use class="shape" href={state === "found" ? "#lore-page-found" : "#lore-page"} x={-size / 2} y={-size / 2} width={size} height={size} />
+              ) : pin.place ? (
+                <image class="shape place-icon" href={pin.place.iconUrl} x={-size / 2} y={-size / 2} width={size} height={size} />
               ) : (
                 <image class="shape" href={flameIconUrl} x={-size / 2} y={-size / 2} width={size} height={size} />
               )}
@@ -312,6 +332,16 @@ function Markers({ hover, moved }: { hover: Signal<Hover | null>; moved: RefObje
 
 function PinDetails({ pin }: { pin: Pin }) {
   const page = pin.page;
+  const place = pin.place;
+
+  if (place) {
+    return (
+      <div class="grid gap-1 text-[13px] leading-4.5 text-(--text-secondary)">
+        {place.description && <p>{place.description}</p>}
+        {place.level > 0 && <p class="tabular-nums">Level {place.level}</p>}
+      </div>
+    );
+  }
 
   if (!page) {
     return null;
@@ -350,7 +380,13 @@ function Popover() {
   return (
     <div class="floating menu-in absolute bottom-3 left-3 z-3 grid w-[min(340px,calc(100%-24px))] gap-3 rounded-[18px] p-4">
       <div class="flex items-center justify-between gap-2">
-        <span class="mono-caption">{selected.page ? `${selected.page.region} · ${selected.page.category}` : selected.group}</span>
+        <span class="mono-caption">
+          {selected.page
+            ? `${selected.page.region} · ${selected.page.category}`
+            : selected.place
+              ? `${selected.place.region} · ${selected.place.type.label}`
+              : selected.group}
+        </span>
         <button class="btn btn-ghost btn-icon -my-1.5 -mr-2" aria-label="Close" onClick={() => selectPin(null, false)}>
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
             <path d="M4 4l8 8M12 4l-8 8" />
@@ -358,11 +394,13 @@ function Popover() {
         </button>
       </div>
       <div class="flex flex-wrap items-center justify-between gap-2.5">
-        <h2 class={`title text-primary ${selected.layer === "lore" ? "text-lg!" : ""}`}>{selected.title}</h2>
-        <span class="status">
-          <span class={`dot dot-${state}`} />
-          {selected.layer === "lore" ? loreStateWords[state] : stateWords[state]}
-        </span>
+        <h2 class={`title text-primary ${selected.layer === "flames" ? "" : "text-lg!"}`}>{selected.title}</h2>
+        {selected.layer !== "places" && (
+          <span class="status">
+            <span class={`dot dot-${state}`} />
+            {selected.layer === "lore" ? loreStateWords[state] : stateWords[state]}
+          </span>
+        )}
       </div>
       <PinDetails pin={selected} />
       <p class="mono-caption tabular-nums">
@@ -374,7 +412,7 @@ function Popover() {
         </button>
         <span class="mono-label tabular-nums">{position >= 0 ? `${position + 1} / ${steps.length}` : ""}</span>
         <button class="btn btn-action btn-sm" disabled={isAlone} onClick={() => stepBy(1)}>
-          Next{foundIds.value ? " missing" : ""}
+          Next{foundIds.value && selected.layer !== "places" ? " missing" : ""}
         </button>
       </div>
     </div>
@@ -387,7 +425,13 @@ export function MapView() {
   const frameRef = useRef<HTMLElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const hover = useSignal<Hover | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const { moved, dragging } = useMapGestures(svgRef, () => (hover.value = null));
+  const pickPlace = usePlaceCanvas(canvasRef);
+  const placeAt = (event: MouseEvent) => {
+    const frame = frameRef.current!.getBoundingClientRect();
+    return activeLayer.peek() === "places" ? pickPlace(event.clientX - frame.left, event.clientY - frame.top) : null;
+  };
 
   useEffect(() => {
     const frame = frameRef.current!;
@@ -446,15 +490,27 @@ export function MapView() {
         class={`absolute inset-0 block h-full w-full touch-none select-none ${dragging ? "cursor-grabbing" : "cursor-grab"}`}
         onWheel={handleWheel}
         onClick={(event) => {
-          if (!moved.current && !(event.target as Element).closest(".marker")) {
-            selectPin(null, false);
+          if (moved.current || (event.target as Element).closest(".marker")) {
+            return;
           }
+          selectPin(placeAt(event), false);
         }}
+        onPointerMove={(event) => {
+          if (activeLayer.peek() !== "places" || event.pointerType !== "mouse" || dragging) {
+            return;
+          }
+          const pin = placeAt(event);
+          event.currentTarget.style.cursor = pin ? "pointer" : "";
+          hover.value = pin ? { pin, clientX: event.clientX, clientY: event.clientY } : null;
+        }}
+        onPointerLeave={() => activeLayer.peek() === "places" && (hover.value = null)}
       >
         <image href={mapImageUrl} x={0} y={0} width={mapSize} height={mapSize} preserveAspectRatio="none" />
+        {fogUrl.value && showFog.value && <image class="fog" href={fogUrl.value} x={0} y={0} width={mapSize} height={mapSize} preserveAspectRatio="none" />}
         <RegionLabels />
         <Markers hover={hover} moved={moved} />
       </svg>
+      <canvas ref={canvasRef} class="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true" />
       <div class="absolute top-3 right-3 grid gap-1.5" role="group" aria-label="Zoom">
         <button aria-label="Zoom in" class={zoomButtonClass} onClick={() => zoomBy(0.6)}>
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
@@ -479,6 +535,15 @@ export function MapView() {
         <a class="underline" href="https://enshrouded.wiki.gg/" target="_blank" rel="noopener">
           Enshrouded Wiki
         </a>
+        {activeLayer.value === "places" && (
+          <>
+            {" "}
+            · Places{" "}
+            <a class="underline" href="https://github.com/nicolasferreiraxn/Enshrouded-Interactive-Map" target="_blank" rel="noopener">
+              Enshrouded Interactive Map
+            </a>
+          </>
+        )}
         {activeLayer.value === "lore" && (
           <>
             {" "}

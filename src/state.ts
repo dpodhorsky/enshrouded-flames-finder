@@ -2,12 +2,13 @@ import { batch, computed, signal } from "@preact/signals";
 
 import { orderedLocations, shortName, type LocationKind } from "./locations.ts";
 import { loreCategories, lorePages, loreRegions, type LorePage } from "./lore.ts";
-import { readKnowledge } from "./save.ts";
+import type { PlaceType } from "./places.ts";
+import { fogSize, readFog, readKnowledge } from "./save.ts";
 import { flyTo, toMapX, toMapY, view } from "./viewport.ts";
 
 export type LocationState = "unknown" | "found" | "missing";
 export type ListMode = "missing" | "all";
-export type Layer = "flames" | "lore";
+export type Layer = "flames" | "lore" | "places";
 export type LoreGrouping = "region" | "journal";
 
 // A pin is one marker on the map and one row in the list.
@@ -22,6 +23,15 @@ export type Pin = {
   readonly altitude: number;
   readonly kind?: LocationKind;
   readonly page?: LorePage;
+  readonly place?: Place;
+};
+
+export type Place = {
+  readonly type: PlaceType;
+  readonly iconUrl: string;
+  readonly description: string;
+  readonly region: string;
+  readonly level: number;
 };
 
 export const flamePins: readonly Pin[] = orderedLocations.map((location) => ({
@@ -48,7 +58,38 @@ export const lorePins: readonly Pin[] = lorePages.map((page, index) => ({
   page,
 }));
 
-export const pinsOf = (layer: Layer) => (layer === "flames" ? flamePins : lorePins);
+// Places load on demand: the list holds about 4,000 points and 40 icons.
+export const placePins = signal<readonly Pin[] | null>(null);
+export const visiblePlaceTypes = signal<ReadonlySet<string>>(new Set());
+let placesLoading: Promise<void> | null = null;
+
+export function loadPlaces() {
+  placesLoading ??= Promise.all([import("./places.ts"), import("./place-icons.ts")]).then(([{ placeRegions, placeRows, placeTypes }, { placeIconUrl }]) => {
+    const pins = placeRows.map(([typeIndex, title, description, east, north, altitude, regionIndex, level], index): Pin => {
+      const type = placeTypes[typeIndex]!;
+      return {
+        key: `place-${index}`,
+        layer: "places",
+        knowledgeId: null,
+        title,
+        group: type.label,
+        east,
+        north,
+        altitude,
+        place: { type, iconUrl: placeIconUrl(type.icon), description, region: placeRegions[regionIndex] ?? "", level },
+      };
+    });
+
+    batch(() => {
+      placePins.value = pins;
+      visiblePlaceTypes.value = new Set(placeTypes.filter((type) => type.shownByDefault).map((type) => type.id));
+    });
+  });
+
+  return placesLoading;
+}
+
+export const pinsOf = (layer: Layer) => (layer === "flames" ? flamePins : layer === "lore" ? lorePins : (placePins.value ?? []));
 
 const trackedIds = new Set([...flamePins, ...lorePins].flatMap((pin) => (pin.knowledgeId === null ? [] : [pin.knowledgeId])));
 
@@ -74,13 +115,45 @@ function readStoredSave() {
 
 const storedSave = readStoredSave();
 
+// The explored grid is kept as a PNG data URL: the raw grid is 1.6 MB, the PNG a small part of it.
+const fogStorageKey = "fog";
+
+function readStoredFog() {
+  try {
+    return localStorage.getItem(fogStorageKey);
+  } catch {
+    return null;
+  }
+}
+
+// Unexplored cells are dark and explored cells clear, with the grid's soft edges kept.
+function fogImage(grid: Uint8Array) {
+  const canvas = document.createElement("canvas");
+  canvas.width = fogSize;
+  canvas.height = fogSize;
+  const context = canvas.getContext("2d")!;
+  const image = context.createImageData(fogSize, fogSize);
+
+  for (let cell = 0; cell < grid.length; cell++) {
+    image.data[cell * 4] = 12;
+    image.data[cell * 4 + 1] = 14;
+    image.data[cell * 4 + 2] = 20;
+    image.data[cell * 4 + 3] = Math.round((255 - grid[cell]!) * 0.72);
+  }
+
+  context.putImageData(image, 0, 0);
+  return canvas.toDataURL("image/png");
+}
+
 export const foundIds = signal<ReadonlySet<number> | null>(storedSave?.ids ?? null);
 export const saveTracksLore = signal(storedSave?.tracksLore ?? false);
+export const fogUrl = signal<string | null>(storedSave ? readStoredFog() : null);
+export const showFog = signal(true);
 export const activeLayer = signal<Layer>("flames");
 export const selectedPin = signal<Pin | null>(null);
 export const errorMessage = signal("");
 export const listMode = signal<ListMode>("all");
-export const loreQuery = signal("");
+export const searchQuery = signal("");
 export const loreGrouping = signal<LoreGrouping>("region");
 export const visibleKinds = signal<Record<LocationKind, boolean>>({
   shrine: true,
@@ -97,14 +170,21 @@ export function stateOf(pin: Pin): LocationState {
 }
 
 const matchesQuery = (pin: Pin, query: string) =>
-  !query || [pin.title, pin.group, pin.page?.region ?? "", pin.page?.collection ?? ""].some((text) => text.toLowerCase().includes(query));
+  !query ||
+  [pin.title, pin.group, pin.page?.region ?? "", pin.page?.collection ?? "", pin.place?.region ?? "", pin.place?.description ?? ""].some((text) =>
+    text.toLowerCase().includes(query),
+  );
 
 export function isShown(pin: Pin) {
   if (pin.layer !== activeLayer.value || (listMode.value === "missing" && stateOf(pin) === "found")) {
     return false;
   }
 
-  return pin.layer === "flames" ? visibleKinds.value[pin.kind!] : matchesQuery(pin, loreQuery.value.trim().toLowerCase());
+  if (pin.layer === "flames") {
+    return visibleKinds.value[pin.kind!];
+  }
+
+  return (pin.layer === "lore" || visiblePlaceTypes.value.has(pin.place!.type.id)) && matchesQuery(pin, searchQuery.value.trim().toLowerCase());
 }
 
 // Flames group by region. Lore groups by region or by the journal category the game files it under.
@@ -138,7 +218,7 @@ export function selectPin(pin: Pin | null, fly: boolean) {
     flyTo({
       centerX: toMapX(pin.east),
       centerY: toMapY(pin.north),
-      width: Math.min(view.peek().width, pin.layer === "lore" ? 1400 : 2200),
+      width: Math.min(view.peek().width, pin.layer === "flames" ? 2200 : 1400),
     });
   }
 }
@@ -147,7 +227,12 @@ export function setLayer(layer: Layer) {
   batch(() => {
     activeLayer.value = layer;
     selectedPin.value = null;
+    searchQuery.value = "";
   });
+
+  if (layer === "places") {
+    void loadPlaces();
+  }
 }
 
 export function stepBy(direction: 1 | -1) {
@@ -167,18 +252,27 @@ export async function loadSave(file: File) {
   errorMessage.value = "";
 
   try {
-    const knowledgeIds = readKnowledge(new Uint8Array(await file.arrayBuffer()));
+    const save = new Uint8Array(await file.arrayBuffer());
+    const knowledgeIds = readKnowledge(save);
     const ids = new Set([...trackedIds].filter((id) => knowledgeIds.has(id)));
+    const grid = readFog(save);
+    const fog = grid ? fogImage(grid) : null;
 
     batch(() => {
       foundIds.value = ids;
       saveTracksLore.value = true;
+      fogUrl.value = fog;
       selectedPin.value = null;
     });
 
     try {
       localStorage.setItem(foundStorageKey, JSON.stringify([...ids]));
       localStorage.setItem(loreStorageKey, "1");
+      if (fog) {
+        localStorage.setItem(fogStorageKey, fog);
+      } else {
+        localStorage.removeItem(fogStorageKey);
+      }
     } catch {
       // Blocked storage only stops the save from loading again on the next visit.
     }
@@ -191,11 +285,13 @@ export function forgetSave() {
   batch(() => {
     foundIds.value = null;
     saveTracksLore.value = false;
+    fogUrl.value = null;
   });
 
   try {
     localStorage.removeItem(foundStorageKey);
     localStorage.removeItem(loreStorageKey);
+    localStorage.removeItem(fogStorageKey);
   } catch {
     // Blocked storage holds no save to remove.
   }

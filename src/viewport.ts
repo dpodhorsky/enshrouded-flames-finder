@@ -32,7 +32,15 @@ export const viewBox = computed(() => {
   return `${centerX - width / 2} ${centerY - height / 2} ${width} ${height}`;
 });
 
-export const markerScale = computed(() => `scale(${view.value.width / frameSize.value.width})`);
+// Markers keep about one size on screen. The scale moves in steps of 1/8 of a doubling (about 9 %), so a marker is at most about
+// 4 % off its size. Panning never changes the string and zooming changes it every few frames, so the thousands of markers on the
+// Places layer are not rewritten on every frame.
+const scaleSteps = 8;
+
+export const markerScale = computed(() => {
+  const scale = view.value.width / frameSize.value.width;
+  return `scale(${2 ** (Math.round(Math.log2(scale) * scaleSteps) / scaleSteps)})`;
+});
 
 export const clampWidth = (width: number) => {
   const frame = frameSize.peek();

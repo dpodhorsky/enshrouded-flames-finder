@@ -3,7 +3,8 @@ import { describe, expect, test } from "vitest";
 
 import { locations } from "./locations.ts";
 import { lorePages, loreRegions } from "./lore.ts";
-import { readKnowledge } from "./save.ts";
+import { placeRegions, placeRows, placeTypes } from "./places.ts";
+import { readFog, readKnowledge } from "./save.ts";
 
 const fixtures = new URL("fixtures/", import.meta.url);
 
@@ -55,6 +56,27 @@ describe("lore pages", () => {
       expect(page.east).toBeGreaterThan(0);
       expect(page.north).toBeGreaterThan(0);
       expect(loreRegions).toContain(page.region);
+    }
+  });
+});
+
+describe("readFog", () => {
+  test("NoFogBlock", async () => {
+    // The fixture character holds only player_knowledge, like a character that has never been in a world.
+    const save = await readFile(new URL("character0.ksd", fixtures));
+
+    expect(readFog(save)).toBeNull();
+  });
+});
+
+describe("places", () => {
+  test("EveryPlaceHasATypeAndARegion", () => {
+    for (const [typeIndex, title, , east, north, , regionIndex] of placeRows) {
+      expect(placeTypes[typeIndex]).toBeDefined();
+      expect(placeRegions[regionIndex]).toBeDefined();
+      expect(title).not.toBe("");
+      expect(east).toBeGreaterThan(0);
+      expect(north).toBeGreaterThan(0);
     }
   });
 });

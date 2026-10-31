@@ -10,6 +10,7 @@ import {
   activePins,
   checkableCount,
   errorMessage,
+  fogUrl,
   forgetSave,
   foundCount,
   foundIds,
@@ -17,15 +18,18 @@ import {
   listMode,
   loadSave,
   loreGrouping,
-  loreQuery,
   pickSaveFile,
+  placePins,
   saveTracksLore,
+  searchQuery,
   selectedPin,
   selectPin,
   setLayer,
+  showFog,
   shownPins,
   stateOf,
   visibleKinds,
+  visiblePlaceTypes,
   type Layer,
   type ListMode,
   type LoreGrouping,
@@ -40,6 +44,10 @@ const layers: { value: Layer; label: string }[] = [
   {
     value: "lore",
     label: "Lore",
+  },
+  {
+    value: "places",
+    label: "Places",
   },
 ];
 
@@ -78,6 +86,10 @@ const kindToggles: { kind: LocationKind; label: string }[] = [
 
 function statusText() {
   const isLore = activeLayer.value === "lore";
+
+  if (activeLayer.value === "places") {
+    return placePins.value ? `${shownPins.value.length} / ${placePins.value.length} places` : "Loading places";
+  }
 
   if (foundIds.value === null) {
     return `${activePins.value.length} ${isLore ? "lore pages" : "flames"}`;
@@ -158,6 +170,10 @@ function PinIcon({ pin, found }: { pin: Pin; found: boolean }) {
     );
   }
 
+  if (pin.place) {
+    return <img class="size-4.5 shrink-0" src={pin.place.iconUrl} alt="" loading="lazy" />;
+  }
+
   return <img class={`size-4.5 ${found ? "opacity-60 grayscale" : ""}`} src={flameIconUrl} alt="" />;
 }
 
@@ -172,6 +188,7 @@ function PinRow({ pin }: { pin: Pin }) {
         <span class="min-w-0 flex-1 truncate font-medium" title={pin.title}>
           {pin.title}
         </span>
+        {pin.place && <span class="mono-caption shrink-0">{pin.place.region}</span>}
         {page && page.parts > 1 && (
           <span class="mono-caption shrink-0 tabular-nums">
             {page.part}/{page.parts}
@@ -212,12 +229,96 @@ function Track<T extends string>({
   );
 }
 
+function SearchBox({ label }: { label: string }) {
+  return (
+    <input
+      class="search"
+      type="search"
+      placeholder={label}
+      aria-label={label}
+      value={searchQuery.value}
+      onInput={(event) => (searchQuery.value = event.currentTarget.value)}
+    />
+  );
+}
+
+function toggleInSet(set: ReadonlySet<string>, value: string) {
+  const next = new Set(set);
+  if (!next.delete(value)) {
+    next.add(value);
+  }
+  return next;
+}
+
+function PlaceTypeFilters() {
+  const pins = placePins.value;
+  if (!pins) {
+    return null;
+  }
+
+  const types = [...new Map(pins.map((pin) => [pin.place!.type.id, pin.place!.type])).values()];
+  const counts = Map.groupBy(pins, (pin) => pin.place!.type.id);
+  const visible = visiblePlaceTypes.value;
+
+  return (
+    <details class="place-types">
+      <summary class="mono-caption">
+        Types · {visible.size} of {types.length} shown
+      </summary>
+      <div class="mt-2 flex gap-1.5">
+        <button class="chip chip-sm" onClick={() => (visiblePlaceTypes.value = new Set(types.map((type) => type.id)))}>
+          All
+        </button>
+        <button class="chip chip-sm" onClick={() => (visiblePlaceTypes.value = new Set())}>
+          None
+        </button>
+        <button class="chip chip-sm" onClick={() => (visiblePlaceTypes.value = new Set(types.filter((type) => type.shownByDefault).map((type) => type.id)))}>
+          Default
+        </button>
+      </div>
+      {[...Map.groupBy(types, (type) => type.group)].map(([group, groupTypes]) => (
+        <div key={group} class="mt-2.5" role="group" aria-label={group}>
+          <h3 class="mono-caption mb-1.5">{group}</h3>
+          <div class="flex flex-wrap gap-1.5">
+            {groupTypes.map((type) => (
+              <button
+                key={type.id}
+                class="chip chip-sm gap-1.5"
+                aria-pressed={visible.has(type.id)}
+                onClick={() => (visiblePlaceTypes.value = toggleInSet(visible, type.id))}
+              >
+                <img class="size-4" src={counts.get(type.id)![0]!.place!.iconUrl} alt="" />
+                {type.label}
+                <span class="tabular-nums opacity-60">{counts.get(type.id)!.length}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </details>
+  );
+}
+
+function FogToggle() {
+  if (!fogUrl.value) {
+    return null;
+  }
+
+  return (
+    <button class="chip justify-center" aria-pressed={showFog.value} onClick={() => (showFog.value = !showFog.value)}>
+      Shade unexplored areas
+    </button>
+  );
+}
+
 function Filters() {
+  const layer = activeLayer.value;
+
   return (
     <div class="grid gap-2 border-b border-line p-3">
-      <Track label="Layer" options={layers} value={activeLayer.value} onChange={setLayer} />
-      <Track label="Show" options={listModes} value={listMode.value} onChange={(value) => (listMode.value = value)} />
-      {activeLayer.value === "flames" ? (
+      <Track label="Layer" options={layers} value={layer} onChange={setLayer} />
+      {layer !== "places" && <Track label="Show" options={listModes} value={listMode.value} onChange={(value) => (listMode.value = value)} />}
+      {layer === "flames" && (
         <div class="grid grid-cols-2 gap-1.5" role="group" aria-label="Types">
           {kindToggles.map(({ kind, label }) => (
             <button
@@ -235,19 +336,20 @@ function Filters() {
             </button>
           ))}
         </div>
-      ) : (
+      )}
+      {layer === "lore" && (
         <>
           <Track label="Group" options={loreGroupings} value={loreGrouping.value} onChange={(value) => (loreGrouping.value = value)} />
-          <input
-            class="search"
-            type="search"
-            placeholder="Search lore pages"
-            aria-label="Search lore pages"
-            value={loreQuery.value}
-            onInput={(event) => (loreQuery.value = event.currentTarget.value)}
-          />
+          <SearchBox label="Search lore pages" />
         </>
       )}
+      {layer === "places" && (
+        <>
+          <SearchBox label="Search places" />
+          <PlaceTypeFilters />
+        </>
+      )}
+      <FogToggle />
     </div>
   );
 }
@@ -255,6 +357,10 @@ function Filters() {
 function emptyText() {
   if (listMode.value === "missing" && foundIds.value !== null) {
     return activeLayer.value === "lore" ? "Nothing missing here. Every lore page is read." : "Nothing missing here. Every flame is lit.";
+  }
+
+  if (activeLayer.value === "places") {
+    return placePins.value ? "No place matches. Turn on more types, or change the search." : "Loading places…";
   }
 
   return activeLayer.value === "lore" ? "No lore page matches the search." : "Turn on Shrines or Sanctums to see locations.";

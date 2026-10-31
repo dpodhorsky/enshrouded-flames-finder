@@ -5,8 +5,7 @@ const ascii = (bytes: Uint8Array, offset: number, length: number) => String.from
 // An SV2C container holds the directory offset at 0x28 (plus 40) and the block count at 0x2c.
 // Each directory entry is 20 bytes: name offset (relative to the entry), name length, block offset, block size, hash.
 // Each block starts with "S2BH". Byte 9 is the zstd flag and the payload starts at byte 14.
-// The player_knowledge payload is: u32 state, u32 count, count ids, count values.
-export function readKnowledge(save: Uint8Array): Set<number> {
+function readBlocks(save: Uint8Array) {
   const view = new DataView(save.buffer, save.byteOffset, save.byteLength);
 
   if (save.length < 0x30 || ascii(save, 0, 4) !== "SV2C") {
@@ -15,29 +14,58 @@ export function readKnowledge(save: Uint8Array): Set<number> {
 
   const directoryOffset = view.getUint32(0x28, true) + 40;
   const blockCount = view.getUint32(0x2c, true);
+  const blocks = new Map<string, Uint8Array>();
 
   for (let blockIndex = 0; blockIndex < blockCount; blockIndex++) {
     const entryOffset = directoryOffset + 20 * blockIndex;
     const name = ascii(save, entryOffset + view.getUint32(entryOffset, true), view.getUint32(entryOffset + 4, true));
-    if (name !== "player_knowledge") {
-      continue;
-    }
-
     const blockOffset = view.getUint32(entryOffset + 8, true);
-    const block = save.subarray(blockOffset, blockOffset + view.getUint32(entryOffset + 12, true));
-    if (ascii(block, 0, 4) !== "S2BH") {
-      throw new Error("The save is damaged: its knowledge block has no S2BH header.");
-    }
-
-    const payload = block[9] === 1 ? decompress(block.subarray(14)) : block.subarray(14);
-    const payloadView = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
-    const idCount = payloadView.getUint32(4, true);
-    if (payload.length !== 8 + 8 * idCount) {
-      throw new Error("The save is damaged: its knowledge block has an unexpected size.");
-    }
-
-    return new Set(Array.from({ length: idCount }, (_, idIndex) => payloadView.getUint32(8 + 4 * idIndex, true)));
+    blocks.set(name, save.subarray(blockOffset, blockOffset + view.getUint32(entryOffset + 12, true)));
   }
 
-  throw new Error("This file holds no character knowledge. It can be a world save. Select characterN.ksd.");
+  return blocks;
+}
+
+function payloadOf(block: Uint8Array, name: string) {
+  if (ascii(block, 0, 4) !== "S2BH") {
+    throw new Error(`The save is damaged: its ${name} block has no S2BH header.`);
+  }
+
+  return block[9] === 1 ? decompress(block.subarray(14)) : block.subarray(14);
+}
+
+// The player_knowledge payload is: u32 state, u32 count, count ids, count values.
+export function readKnowledge(save: Uint8Array): Set<number> {
+  const block = readBlocks(save).get("player_knowledge");
+  if (!block) {
+    throw new Error("This file holds no character knowledge. It can be a world save. Select characterN.ksd.");
+  }
+
+  const payload = payloadOf(block, "knowledge");
+  const payloadView = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  const idCount = payloadView.getUint32(4, true);
+  if (payload.length !== 8 + 8 * idCount) {
+    throw new Error("The save is damaged: its knowledge block has an unexpected size.");
+  }
+
+  return new Set(Array.from({ length: idCount }, (_, idIndex) => payloadView.getUint32(8 + 4 * idIndex, true)));
+}
+
+export const fogSize = 1280;
+
+// The fogofwar payload is a 13-byte header with "FGOW" at byte 8, then a 1280 by 1280 grid, one byte per cell, row by row.
+// Row 0 is the north edge of the 10240 m map, so a cell is 8 m. 0 is fogged and 255 is explored.
+// A character that has never been in a world has no fogofwar block. This returns null then, and for a layout it does not know.
+export function readFog(save: Uint8Array): Uint8Array | null {
+  const block = readBlocks(save).get("fogofwar");
+  if (!block) {
+    return null;
+  }
+
+  const payload = payloadOf(block, "fog of war");
+  if (payload.length !== 13 + fogSize * fogSize || ascii(payload, 8, 4) !== "FGOW") {
+    return null;
+  }
+
+  return payload.subarray(13);
 }
