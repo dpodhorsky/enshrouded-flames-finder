@@ -4,8 +4,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 
 import flameIconUrl from "./assets/flame-shrine.png";
 import mapImageUrl from "./assets/map.webp";
-import { locations, locationsOfRegion, regions, shortName, type FlameLocation } from "./locations.ts";
-import { foundIds, isShown, selectedLocation, selectLocation, stateOf, stepBy, stepLocations } from "./state.ts";
+import { locationsOfRegion, regions } from "./locations.ts";
+import { LoreIcon } from "./lore-icon.tsx";
+import { activeLayer, activePins, foundIds, isShown, selectedPin, selectPin, stateOf, stepBy, stepPins, type Pin } from "./state.ts";
 import {
   clampWidth,
   flyTo,
@@ -27,7 +28,7 @@ import {
 } from "./viewport.ts";
 
 type Hover = {
-  location: FlameLocation;
+  pin: Pin;
   clientX: number;
   clientY: number;
 };
@@ -40,10 +41,16 @@ type Point = {
 type Gesture = { kind: "pan"; start: Point; startView: View } | { kind: "pinch"; startDistance: number; anchor: [number, number]; startView: View };
 
 const markerSize = 24;
+const loreMarkerSize = 18;
 const numberFormat = new Intl.NumberFormat("en");
 const stateWords = {
   missing: "Missing",
   found: "Found",
+  unknown: "Not checked",
+} as const;
+const loreStateWords = {
+  missing: "Unread",
+  found: "Read",
   unknown: "Not checked",
 } as const;
 
@@ -198,7 +205,7 @@ function Tooltip({ hover, frameRef }: { hover: Signal<Hover | null>; frameRef: R
     return null;
   }
 
-  const state = stateOf(current.location);
+  const state = stateOf(current.pin);
 
   return (
     <div
@@ -206,10 +213,10 @@ function Tooltip({ hover, frameRef }: { hover: Signal<Hover | null>; frameRef: R
       class="floating pointer-events-none absolute z-2 grid gap-1 rounded-lg px-3 py-2 text-[13px] leading-4.5 font-medium whitespace-nowrap text-primary"
     >
       <small class="mono-caption">
-        {current.location.region}
+        {current.pin.group}
         {state === "unknown" ? "" : ` · ${state}`}
       </small>
-      {shortName(current.location)}
+      {current.pin.title}
     </div>
   );
 }
@@ -237,18 +244,19 @@ function RegionLabels() {
 }
 
 function Markers({ hover, moved }: { hover: Signal<Hover | null>; moved: RefObject<boolean> }) {
-  const selected = selectedLocation.value;
+  const selected = selectedPin.value;
+  const pins = activePins.value;
   // Missing markers draw above the other markers, and the selected marker draws above all.
   const ordered = [
-    ...locations.filter((location) => stateOf(location) !== "missing" && location !== selected),
-    ...locations.filter((location) => stateOf(location) === "missing" && location !== selected),
+    ...pins.filter((pin) => stateOf(pin) !== "missing" && pin !== selected),
+    ...pins.filter((pin) => stateOf(pin) === "missing" && pin !== selected),
     ...(selected ? [selected] : []),
   ];
 
-  const updateHover = (location: FlameLocation, event: TargetedPointerEvent<SVGGElement>) => {
+  const updateHover = (pin: Pin, event: TargetedPointerEvent<SVGGElement>) => {
     if (event.pointerType === "mouse") {
       hover.value = {
-        location,
+        pin,
         clientX: event.clientX,
         clientY: event.clientY,
       };
@@ -267,26 +275,34 @@ function Markers({ hover, moved }: { hover: Signal<Hover | null>; moved: RefObje
           <feDropShadow dy="1" stdDeviation="0.75" flood-opacity="0.6" />
         </filter>
       </defs>
-      {ordered.map((location) => {
-        const classes = ["marker", stateOf(location), location === selected && "selected", !isShown(location) && location !== selected && "hidden-marker"];
+      {ordered.map((pin) => {
+        const state = stateOf(pin);
+        const classes = ["marker", state, pin === selected && "selected", !isShown(pin) && pin !== selected && "hidden-marker"];
+        const size = pin.layer === "lore" ? loreMarkerSize : markerSize;
 
         return (
           <g
-            key={location.knowledgeId}
+            key={pin.key}
             class={classes.filter(Boolean).join(" ")}
-            transform={`translate(${toMapX(location.east)} ${toMapY(location.north)})`}
+            transform={`translate(${toMapX(pin.east)} ${toMapY(pin.north)})`}
             onClick={() => {
               if (!moved.current) {
-                selectLocation(location, false);
+                selectPin(pin, false);
               }
             }}
-            onPointerEnter={(event) => updateHover(location, event)}
-            onPointerMove={(event) => updateHover(location, event)}
+            onPointerEnter={(event) => updateHover(pin, event)}
+            onPointerMove={(event) => updateHover(pin, event)}
             onPointerLeave={() => (hover.value = null)}
           >
             <g transform={markerScale}>
-              <circle class="ring" r={markerSize / 2 + 3} />
-              <image class="shape" href={flameIconUrl} x={-markerSize / 2} y={-markerSize / 2} width={markerSize} height={markerSize} />
+              <circle class="ring" r={size / 2 + 3} />
+              {pin.layer === "lore" ? (
+                <g class="shape" transform={`scale(${size / 24})`}>
+                  <LoreIcon found={state === "found"} />
+                </g>
+              ) : (
+                <image class="shape" href={flameIconUrl} x={-size / 2} y={-size / 2} width={size} height={size} />
+              )}
             </g>
           </g>
         );
@@ -295,34 +311,61 @@ function Markers({ hover, moved }: { hover: Signal<Hover | null>; moved: RefObje
   );
 }
 
+function PinDetails({ pin }: { pin: Pin }) {
+  const page = pin.page;
+
+  if (!page) {
+    return null;
+  }
+
+  return (
+    <div class="grid gap-1 text-[13px] leading-4.5 text-(--text-secondary)">
+      {page.collection && (
+        <p>
+          <span class="text-primary">{page.collection}</span>
+          {page.parts > 0 && (
+            <span class="tabular-nums">
+              {" "}
+              · part {page.part} of {page.parts}
+            </span>
+          )}
+        </p>
+      )}
+      {page.hint && <p>{page.hint}</p>}
+      {page.knowledgeId === null && <p class="text-muted">The save id of this page is not known yet, so a save cannot tell whether it is read.</p>}
+    </div>
+  );
+}
+
 function Popover() {
-  const selected = selectedLocation.value;
+  const selected = selectedPin.value;
   if (!selected) {
     return null;
   }
 
   const state = stateOf(selected);
-  const steps = stepLocations.value;
+  const steps = stepPins.value;
   const position = steps.indexOf(selected);
   const isAlone = steps.length < 2 && position >= 0;
 
   return (
     <div class="floating menu-in absolute bottom-3 left-3 z-3 grid w-[min(340px,calc(100%-24px))] gap-3 rounded-[18px] p-4">
       <div class="flex items-center justify-between gap-2">
-        <span class="mono-caption">{selected.region}</span>
-        <button class="btn btn-ghost btn-icon -my-1.5 -mr-2" aria-label="Close" onClick={() => selectLocation(null, false)}>
+        <span class="mono-caption">{selected.group}</span>
+        <button class="btn btn-ghost btn-icon -my-1.5 -mr-2" aria-label="Close" onClick={() => selectPin(null, false)}>
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
             <path d="M4 4l8 8M12 4l-8 8" />
           </svg>
         </button>
       </div>
       <div class="flex flex-wrap items-center justify-between gap-2.5">
-        <h2 class="title text-primary">{shortName(selected)}</h2>
+        <h2 class={`title text-primary ${selected.layer === "lore" ? "text-lg!" : ""}`}>{selected.title}</h2>
         <span class="status">
           <span class={`dot dot-${state}`} />
-          {stateWords[state]}
+          {selected.layer === "lore" ? loreStateWords[state] : stateWords[state]}
         </span>
       </div>
+      <PinDetails pin={selected} />
       <p class="mono-caption tabular-nums">
         E {numberFormat.format(selected.east)} · N {numberFormat.format(selected.north)} · Alt {numberFormat.format(selected.altitude)} m
       </p>
@@ -378,7 +421,7 @@ export function MapView() {
       ArrowRight: () => panBy(panDistance, 0),
       ArrowUp: () => panBy(0, -panDistance),
       ArrowDown: () => panBy(0, panDistance),
-      Escape: () => selectLocation(null, false),
+      Escape: () => selectPin(null, false),
     };
 
     const action = actions[event.key];
@@ -399,13 +442,13 @@ export function MapView() {
       <svg
         ref={svgRef}
         role="img"
-        aria-label="Flame shrines and sanctums on the Embervale map"
+        aria-label={activeLayer.value === "lore" ? "Lore pages on the Embervale map" : "Flame shrines and sanctums on the Embervale map"}
         viewBox={viewBox}
         class={`absolute inset-0 block h-full w-full touch-none select-none ${dragging ? "cursor-grabbing" : "cursor-grab"}`}
         onWheel={handleWheel}
         onClick={(event) => {
           if (!moved.current && !(event.target as Element).closest(".marker")) {
-            selectLocation(null, false);
+            selectPin(null, false);
           }
         }}
       >
@@ -437,6 +480,15 @@ export function MapView() {
         <a class="underline" href="https://enshrouded.wiki.gg/" target="_blank" rel="noopener">
           Enshrouded Wiki
         </a>
+        {activeLayer.value === "lore" && (
+          <>
+            {" "}
+            · Lore{" "}
+            <a class="underline" href="https://github.com/nicolasferreiraxn/Enshrouded-Interactive-Map" target="_blank" rel="noopener">
+              Enshrouded Interactive Map
+            </a>
+          </>
+        )}
       </div>
     </section>
   );

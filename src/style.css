@@ -291,6 +291,26 @@
     }
   }
 
+  .search {
+    height: 32px;
+    padding: 0 14px;
+    border: 1px solid var(--border-card);
+    border-radius: 999px;
+    background: transparent;
+    font: 500 13px/1 var(--font-sans);
+    color: var(--text-primary);
+
+    &::placeholder {
+      color: var(--text-muted);
+    }
+
+    &:focus-visible {
+      outline: none;
+      border-color: var(--glass-border);
+      box-shadow: var(--shadow-focus);
+    }
+  }
+
   .menu-label {
     display: flex;
     justify-content: space-between;
@@ -298,8 +318,7 @@
   }
 
   .menu-item {
-    display: grid;
-    grid-template-columns: 18px minmax(0, 1fr) auto;
+    display: flex;
     align-items: center;
     gap: 10px;
     width: 100%;

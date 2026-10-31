@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, test } from "vitest";
 
 import { locations } from "./locations.ts";
+import { lorePages } from "./lore.ts";
 import { readKnowledge } from "./save.ts";
 
 const fixtures = new URL("fixtures/", import.meta.url);
@@ -35,5 +36,24 @@ describe("readKnowledge", () => {
     const save = await readFile(new URL("world5.ksd", fixtures));
 
     expect(() => readKnowledge(save)).toThrow(new Error("This file holds no character knowledge. It can be a world save. Select characterN.ksd."));
+  });
+});
+
+describe("lore pages", () => {
+  test("CharacterSave", async () => {
+    const save = await readFile(new URL("character0.ksd", fixtures));
+
+    const knowledgeIds = readKnowledge(save);
+    const readPages = lorePages.filter((page) => page.knowledgeId !== null && knowledgeIds.has(page.knowledgeId));
+
+    expect(readPages.length).toBe(290);
+  });
+
+  test("EveryPageHasAPlace", () => {
+    for (const page of lorePages) {
+      expect(page.title).not.toBe("");
+      expect(page.east).toBeGreaterThan(0);
+      expect(page.north).toBeGreaterThan(0);
+    }
   });
 });

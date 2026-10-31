@@ -2,23 +2,43 @@ import { useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
 
 import flameIconUrl from "./assets/flame-shrine.png";
-import { locations, shortName, type FlameLocation, type LocationKind } from "./locations.ts";
+import { type LocationKind } from "./locations.ts";
+import { LoreIcon } from "./lore-icon.tsx";
 import { MapView } from "./map.tsx";
 import {
+  activeLayer,
+  activePins,
+  checkableCount,
   errorMessage,
   forgetSave,
   foundCount,
   foundIds,
   listMode,
   loadSave,
+  loreQuery,
   pickSaveFile,
-  selectedLocation,
-  selectLocation,
-  shownLocations,
+  saveTracksLore,
+  selectedPin,
+  selectPin,
+  setLayer,
+  shownPins,
   stateOf,
   visibleKinds,
+  type Layer,
   type ListMode,
+  type Pin,
 } from "./state.ts";
+
+const layers: { value: Layer; label: string }[] = [
+  {
+    value: "flames",
+    label: "Flames",
+  },
+  {
+    value: "lore",
+    label: "Lore",
+  },
+];
 
 const listModes: { value: ListMode; label: string }[] = [
   {
@@ -42,6 +62,20 @@ const kindToggles: { kind: LocationKind; label: string }[] = [
   },
 ];
 
+function statusText() {
+  const isLore = activeLayer.value === "lore";
+
+  if (foundIds.value === null) {
+    return `${activePins.value.length} ${isLore ? "lore pages" : "flames"}`;
+  }
+
+  if (isLore && !saveTracksLore.value) {
+    return "Load the save again to check lore";
+  }
+
+  return `${foundCount} / ${checkableCount} ${isLore ? "read" : "lit"}`;
+}
+
 function TopBar() {
   const hasSave = foundIds.value !== null;
 
@@ -54,7 +88,7 @@ function TopBar() {
       <div class="flex flex-wrap items-center gap-2">
         <span class="status tabular-nums">
           <span class={`dot ${hasSave ? "dot-found" : ""}`} />
-          {hasSave ? `${foundCount} / ${locations.length} lit` : `${locations.length} flames`}
+          {statusText()}
         </span>
         {hasSave ? (
           <button class="btn btn-glass btn-sm" onClick={forgetSave}>
@@ -101,63 +135,116 @@ function SaveHelp() {
   );
 }
 
-function LocationRow({ location }: { location: FlameLocation }) {
-  const state = stateOf(location);
+function PinIcon({ pin, found }: { pin: Pin; found: boolean }) {
+  if (pin.layer === "lore") {
+    return (
+      <svg class={`size-4.5 shrink-0 ${found ? "opacity-60" : ""}`} viewBox="-12 -12 24 24" aria-hidden="true">
+        <LoreIcon found={found} />
+      </svg>
+    );
+  }
+
+  return <img class={`size-4.5 ${found ? "opacity-60 grayscale" : ""}`} src={flameIconUrl} alt="" />;
+}
+
+function PinRow({ pin }: { pin: Pin }) {
+  const state = stateOf(pin);
+  const page = pin.page;
 
   return (
     <li>
-      <button class="menu-item" aria-current={selectedLocation.value === location} onClick={() => selectLocation(location, true)}>
-        <img class={`size-4.5 ${state === "found" ? "opacity-60 grayscale" : ""}`} src={flameIconUrl} alt="" />
-        <span class="font-medium">{shortName(location)}</span>
+      <button class="menu-item" aria-current={selectedPin.value === pin} onClick={() => selectPin(pin, true)}>
+        <PinIcon pin={pin} found={state === "found"} />
+        <span class="min-w-0 flex-1 truncate font-medium" title={pin.title}>
+          {pin.title}
+        </span>
+        {page && page.parts > 1 && (
+          <span class="mono-caption shrink-0 tabular-nums">
+            {page.part}/{page.parts}
+          </span>
+        )}
         {state !== "unknown" && <span class={`dot dot-${state}`} aria-label={state} />}
       </button>
     </li>
   );
 }
 
-function Filters() {
-  const modeIndex = listModes.findIndex(({ value }) => value === listMode.value);
-
+function Track<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
   return (
-    <div class="grid gap-2 border-b border-line p-3">
-      <div class="track w-full" role="group" aria-label="Show">
-        <span
-          class="track-pill"
-          style={{
-            "--count": listModes.length,
-            "--index": modeIndex,
-          }}
-        />
-        {listModes.map(({ value, label }) => (
-          <button key={value} aria-pressed={listMode.value === value} onClick={() => (listMode.value = value)}>
-            {label}
-          </button>
-        ))}
-      </div>
-      <div class="grid grid-cols-2 gap-1.5" role="group" aria-label="Types">
-        {kindToggles.map(({ kind, label }) => (
-          <button
-            key={kind}
-            class="chip justify-center"
-            aria-pressed={visibleKinds.value[kind]}
-            onClick={() =>
-              (visibleKinds.value = {
-                ...visibleKinds.value,
-                [kind]: !visibleKinds.value[kind],
-              })
-            }
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+    <div class="track w-full" role="group" aria-label={label}>
+      <span
+        class="track-pill"
+        style={{
+          "--count": options.length,
+          "--index": options.findIndex((option) => option.value === value),
+        }}
+      />
+      {options.map((option) => (
+        <button key={option.value} aria-pressed={value === option.value} onClick={() => onChange(option.value)}>
+          {option.label}
+        </button>
+      ))}
     </div>
   );
 }
 
+function Filters() {
+  return (
+    <div class="grid gap-2 border-b border-line p-3">
+      <Track label="Layer" options={layers} value={activeLayer.value} onChange={setLayer} />
+      <Track label="Show" options={listModes} value={listMode.value} onChange={(value) => (listMode.value = value)} />
+      {activeLayer.value === "flames" ? (
+        <div class="grid grid-cols-2 gap-1.5" role="group" aria-label="Types">
+          {kindToggles.map(({ kind, label }) => (
+            <button
+              key={kind}
+              class="chip justify-center"
+              aria-pressed={visibleKinds.value[kind]}
+              onClick={() =>
+                (visibleKinds.value = {
+                  ...visibleKinds.value,
+                  [kind]: !visibleKinds.value[kind],
+                })
+              }
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <input
+          class="search"
+          type="search"
+          placeholder="Search lore pages"
+          aria-label="Search lore pages"
+          value={loreQuery.value}
+          onInput={(event) => (loreQuery.value = event.currentTarget.value)}
+        />
+      )}
+    </div>
+  );
+}
+
+function emptyText() {
+  if (listMode.value === "missing" && foundIds.value !== null) {
+    return activeLayer.value === "lore" ? "Nothing missing here. Every lore page is read." : "Nothing missing here. Every flame is lit.";
+  }
+
+  return activeLayer.value === "lore" ? "No lore page matches the search." : "Turn on Shrines or Sanctums to see locations.";
+}
+
 function Sidebar() {
-  const rows = shownLocations.value;
-  const showsMissing = listMode.value === "missing" && foundIds.value !== null;
+  const rows = shownPins.value;
 
   return (
     <aside class="flex min-h-0 flex-col border-line bg-sheet max-md:max-h-130 max-md:border-t md:border-l" aria-label="Locations">
@@ -169,20 +256,18 @@ function Sidebar() {
           </p>
         )}
         {rows.length === 0 ? (
-          <p class="px-4 py-6 text-[13px] leading-4.5 text-muted">
-            {showsMissing ? "Nothing missing here. Every flame is lit." : "Turn on Shrines or Sanctums to see locations."}
-          </p>
+          <p class="px-4 py-6 text-[13px] leading-4.5 text-muted">{emptyText()}</p>
         ) : (
           <div class="p-1.5">
-            {[...Map.groupBy(rows, (location) => location.region)].map(([region, regionRows]) => (
-              <section key={region} aria-label={region}>
+            {[...Map.groupBy(rows, (pin) => pin.group)].map(([group, groupRows]) => (
+              <section key={group} aria-label={group}>
                 <h2 class="menu-label mono-caption">
-                  <span>{region}</span>
-                  <span>{regionRows.length}</span>
+                  <span>{group}</span>
+                  <span>{groupRows.length}</span>
                 </h2>
-                <ul class="grid gap-0.5">
-                  {regionRows.map((location) => (
-                    <LocationRow key={location.knowledgeId} location={location} />
+                <ul class="grid grid-cols-[minmax(0,1fr)] gap-0.5">
+                  {groupRows.map((pin) => (
+                    <PinRow key={pin.key} pin={pin} />
                   ))}
                 </ul>
               </section>

@@ -1,6 +1,8 @@
 # Flame Shrine Finder
 
-A map of the Flame Shrines in Enshrouded. Drop a `characterN.ksd` save file on the page to see which shrines you have found and which ones you have yet to discover.
+A map of the Flame Shrines and lore pages in Enshrouded. Drop a `characterN.ksd` save file on the page to see which shrines you have found and which lore pages you have read, and which ones you have yet to discover.
+
+Switch between the **Flames** and **Lore** layers in the sidebar. The lore layer lists 517 pages grouped by journal category, with a search box and a hint for where each page is. 45 of those pages have no known save id yet, so a save cannot tell whether they are read. They always show as not checked.
 
 ## Where to find the character save
 
@@ -14,6 +16,16 @@ In that folder, select a `characterN.ksd` file.
 On a shared PC with Steam Cloud on, each Steam account has its own `userdata` folder. With Steam Cloud off, all players on the PC share one save folder.
 
 More information: [Enshrouded save management](https://saraserenity.net/enshrouded/manage_saves.php?action=general#save_location).
+
+## Lore data
+
+`src/lore.ts` is generated from `app/public/data.json` of the [Enshrouded Interactive Map](https://github.com/nicolasferreiraxn/Enshrouded-Interactive-Map) (MIT), whose data comes from the game files of Keen Games. To refresh it:
+
+```sh
+git clone --depth 1 https://github.com/nicolasferreiraxn/Enshrouded-Interactive-Map /tmp/eim
+bun scripts/import-lore.ts /tmp/eim/app/public/data.json
+bun run format
+```
 
 ## Development
 
