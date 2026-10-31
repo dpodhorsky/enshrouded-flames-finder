@@ -2,6 +2,7 @@ import { useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
 
 import flameIconUrl from "./assets/flame-shrine.png";
+import { CharacterButton } from "./character-panel.tsx";
 import { type LocationKind } from "./locations.ts";
 import { LoreIcon } from "./lore-icon.tsx";
 import { MapView } from "./map.tsx";
@@ -116,6 +117,7 @@ function TopBar() {
           <span class={`dot ${hasSave ? "dot-found" : ""}`} />
           {statusText()}
         </span>
+        <CharacterButton />
         {hasSave ? (
           <button class="btn btn-glass btn-sm" onClick={forgetSave}>
             Reset loaded save

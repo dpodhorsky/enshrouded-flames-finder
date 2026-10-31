@@ -359,6 +359,36 @@
     }
   }
 
+  .character-panel {
+    position: fixed;
+    inset: 60px 16px auto auto;
+    width: min(420px, calc(100vw - 32px));
+    max-height: calc(100dvh - 76px);
+    overflow-y: auto;
+    margin: 0;
+    padding: 18px;
+    border: 0;
+    border-radius: var(--radius-lg);
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 18px;
+  }
+
+  .item-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 30px;
+    padding: 0 10px;
+    border-radius: 8px;
+    background: var(--glass-surface);
+  }
+
+  .item-label {
+    width: 92px;
+    flex-shrink: 0;
+  }
+
   .save-help {
     position: fixed;
     inset: 60px 16px auto auto;

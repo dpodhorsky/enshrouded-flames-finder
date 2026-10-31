@@ -34,6 +34,12 @@ function payloadOf(block: Uint8Array, name: string) {
   return block[9] === 1 ? decompress(block.subarray(14)) : block.subarray(14);
 }
 
+// The decompressed payload of a named block, or null when the save has no such block.
+export function readBlock(save: Uint8Array, name: string): Uint8Array | null {
+  const block = readBlocks(save).get(name);
+  return block ? payloadOf(block, name) : null;
+}
+
 // The player_knowledge payload is: u32 state, u32 count, count ids, count values.
 export function readKnowledge(save: Uint8Array): Set<number> {
   const block = readBlocks(save).get("player_knowledge");

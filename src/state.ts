@@ -1,9 +1,10 @@
 import { batch, computed, signal } from "@preact/signals";
 
+import { readCharacterName, readPlayerCharacter, type Character, type ItemRecord } from "./character.ts";
 import { orderedLocations, shortName, type LocationKind } from "./locations.ts";
 import { loreCategories, lorePages, loreRegions, type LorePage } from "./lore.ts";
 import type { PlaceType } from "./places.ts";
-import { fogSize, readFog, readKnowledge } from "./save.ts";
+import { fogSize, readBlock, readFog, readKnowledge } from "./save.ts";
 import { flyTo, toMapX, toMapY, view } from "./viewport.ts";
 
 export type LocationState = "unknown" | "found" | "missing";
@@ -126,6 +127,45 @@ function readStoredFog() {
   }
 }
 
+// The character is kept as JSON. Its Equipped map is stored as [position, item] pairs.
+const characterStorageKey = "character";
+
+type StoredCharacter = Omit<Character, "equipped"> & { equipped: [number, ItemRecord][] };
+
+function readStoredCharacter(): Character | null {
+  try {
+    const stored = JSON.parse(localStorage.getItem(characterStorageKey) ?? "null") as StoredCharacter | null;
+    return stored && Array.isArray(stored.equipped) ? { ...stored, equipped: new Map(stored.equipped) } : null;
+  } catch {
+    return null;
+  }
+}
+
+// A character the page cannot read still loads its flames, lore and fog; the panel then says why it is empty.
+function readCharacter(save: Uint8Array): { character: Character | null; error: string } {
+  try {
+    const data = readBlock(save, "character_data");
+    const player = readBlock(save, "player_character");
+    if (!data || !player) {
+      return { character: null, error: "This save has no character data." };
+    }
+    return { character: { name: readCharacterName(data), ...readPlayerCharacter(player) }, error: "" };
+  } catch (error) {
+    return { character: null, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+// Item names load with the character panel.
+export const itemNames = signal<Readonly<Record<number, string>> | null>(null);
+let itemNamesLoading: Promise<void> | null = null;
+
+export function loadItemNames() {
+  itemNamesLoading ??= import("./items.ts").then((module) => {
+    itemNames.value = module.itemNames;
+  });
+  return itemNamesLoading;
+}
+
 // Unexplored cells are dark and explored cells clear, with the grid's soft edges kept.
 function fogImage(grid: Uint8Array) {
   const canvas = document.createElement("canvas");
@@ -148,6 +188,8 @@ function fogImage(grid: Uint8Array) {
 export const foundIds = signal<ReadonlySet<number> | null>(storedSave?.ids ?? null);
 export const saveTracksLore = signal(storedSave?.tracksLore ?? false);
 export const fogUrl = signal<string | null>(storedSave ? readStoredFog() : null);
+export const character = signal<Character | null>(storedSave ? readStoredCharacter() : null);
+export const characterError = signal("");
 export const showFog = signal(true);
 export const activeLayer = signal<Layer>("flames");
 export const selectedPin = signal<Pin | null>(null);
@@ -257,21 +299,30 @@ export async function loadSave(file: File) {
     const ids = new Set([...trackedIds].filter((id) => knowledgeIds.has(id)));
     const grid = readFog(save);
     const fog = grid ? fogImage(grid) : null;
+    const read = readCharacter(save);
 
     batch(() => {
       foundIds.value = ids;
       saveTracksLore.value = true;
       fogUrl.value = fog;
+      character.value = read.character;
+      characterError.value = read.error;
       selectedPin.value = null;
     });
 
     try {
       localStorage.setItem(foundStorageKey, JSON.stringify([...ids]));
       localStorage.setItem(loreStorageKey, "1");
+      if (read.character) {
+        localStorage.setItem(characterStorageKey, JSON.stringify({ ...read.character, equipped: [...read.character.equipped] }));
+      } else {
+        localStorage.removeItem(characterStorageKey);
+      }
       if (fog) {
         localStorage.setItem(fogStorageKey, fog);
       } else {
         localStorage.removeItem(fogStorageKey);
+        localStorage.removeItem(characterStorageKey);
       }
     } catch {
       // Blocked storage only stops the save from loading again on the next visit.
@@ -286,6 +337,8 @@ export function forgetSave() {
     foundIds.value = null;
     saveTracksLore.value = false;
     fogUrl.value = null;
+    character.value = null;
+    characterError.value = "";
   });
 
   try {

@@ -19,9 +19,11 @@ More information: [Enshrouded save management](https://saraserenity.net/enshroud
 
 The **Places** layer shows about 4,200 points of interest of 40 types: Ancient Spires, Vaults, Night Sanctums, dungeons, villages, camps, bosses, chests, collectibles, secret doors and more. Pick the types under **Types**. Chests, collectibles, bosses, enemy camps and Shroud Roots start hidden. Zoomed out, nearby places are thinned to one per spot, so zoom in to see them all. The save does not tell which places you have found yet.
 
+The **character button** in the top bar (it shows the name and level once a save is loaded) opens the character: level and XP, how many skills are unlocked, the equipped gear and what the character carries, with item names. Skill names are not shown yet: they need the game's own data.
+
 ## Lore and place data
 
-`src/lore.ts`, `src/places.ts` and `src/assets/pins/` are generated from `app/public/data.json` of the [Enshrouded Interactive Map](https://github.com/nicolasferreiraxn/Enshrouded-Interactive-Map) (MIT), whose data comes from the game files of Keen Games. The region of each page is the region of the nearest lore pin on the [All Things How map](https://allthings.how/enshrouded/map/). To refresh it:
+`src/lore.ts`, `src/places.ts`, `src/items.ts` and `src/assets/pins/` are generated from `app/public/data.json` of the [Enshrouded Interactive Map](https://github.com/nicolasferreiraxn/Enshrouded-Interactive-Map) (MIT), whose data comes from the game files of Keen Games. The region of each page is the region of the nearest lore pin on the [All Things How map](https://allthings.how/enshrouded/map/). To refresh it:
 
 ```sh
 git clone --depth 1 https://github.com/nicolasferreiraxn/Enshrouded-Interactive-Map /tmp/eim
