@@ -1,0 +1,6 @@
+{
+  "printWidth": 160,
+  "plugins": ["@ianvs/prettier-plugin-sort-imports", "prettier-plugin-tailwindcss"],
+  "importOrder": ["<THIRD_PARTY_MODULES>", "", "^[.]"],
+  "tailwindStylesheet": "./src/style.css"
+}
