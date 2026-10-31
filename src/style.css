@@ -354,7 +354,7 @@
   & .shape {
     transform-box: fill-box;
     transform-origin: center;
-    filter: drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.6));
+    filter: url(#marker-shadow);
     transition: transform 160ms var(--ease-out);
   }
 
@@ -363,7 +363,7 @@
   }
 
   &.found .shape {
-    filter: grayscale(1) drop-shadow(0 1px 1.5px rgba(0, 0, 0, 0.6));
+    filter: url(#marker-found);
     opacity: 0.7;
   }
 

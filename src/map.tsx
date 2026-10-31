@@ -255,8 +255,18 @@ function Markers({ hover, moved }: { hover: Signal<Hover | null>; moved: RefObje
     }
   };
 
+  // SVG filters, because WebKit ignores CSS filter functions such as grayscale() on SVG elements.
   return (
     <g>
+      <defs>
+        <filter id="marker-shadow">
+          <feDropShadow dy="1" stdDeviation="0.75" flood-opacity="0.6" />
+        </filter>
+        <filter id="marker-found">
+          <feColorMatrix type="saturate" values="0" />
+          <feDropShadow dy="1" stdDeviation="0.75" flood-opacity="0.6" />
+        </filter>
+      </defs>
       {ordered.map((location) => {
         const classes = ["marker", stateOf(location), location === selected && "selected", !isShown(location) && location !== selected && "hidden-marker"];
 
