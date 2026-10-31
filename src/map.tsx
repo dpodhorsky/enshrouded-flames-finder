@@ -5,7 +5,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import flameIconUrl from "./assets/flame-shrine.png";
 import mapImageUrl from "./assets/map.webp";
 import { locationsOfRegion, regions } from "./locations.ts";
-import { LoreIcon } from "./lore-icon.tsx";
+import { LoreSymbols } from "./lore-icon.tsx";
 import { activeLayer, activePins, foundIds, groupOf, isShown, selectedPin, selectPin, stateOf, stepBy, stepPins, type Pin } from "./state.ts";
 import {
   clampWidth,
@@ -267,6 +267,7 @@ function Markers({ hover, moved }: { hover: Signal<Hover | null>; moved: RefObje
   return (
     <g>
       <defs>
+        <LoreSymbols />
         <filter id="marker-shadow">
           <feDropShadow dy="1" stdDeviation="0.75" flood-opacity="0.6" />
         </filter>
@@ -297,9 +298,7 @@ function Markers({ hover, moved }: { hover: Signal<Hover | null>; moved: RefObje
             <g transform={markerScale}>
               <circle class="ring" r={size / 2 + 3} />
               {pin.layer === "lore" ? (
-                <g class="shape" transform={`scale(${size / 24})`}>
-                  <LoreIcon found={state === "found"} />
-                </g>
+                <use class="shape" href={state === "found" ? "#lore-page-found" : "#lore-page"} x={-size / 2} y={-size / 2} width={size} height={size} />
               ) : (
                 <image class="shape" href={flameIconUrl} x={-size / 2} y={-size / 2} width={size} height={size} />
               )}

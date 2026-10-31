@@ -397,7 +397,6 @@
   & .shape {
     transform-box: fill-box;
     transform-origin: center;
-    filter: url(#marker-shadow);
     transition: transform 160ms var(--ease-out);
   }
 
@@ -405,7 +404,11 @@
     transform: scale(1.2);
   }
 
-  &.found .shape {
+  & image.shape {
+    filter: url(#marker-shadow);
+  }
+
+  &.found image.shape {
     filter: url(#marker-found);
     opacity: 0.7;
   }
@@ -414,12 +417,12 @@
     fill: color-mix(in oklab, var(--beam-violet) 30%, transparent);
     stroke: var(--lilac);
     stroke-width: 2;
-    opacity: 0;
+    display: none;
     filter: drop-shadow(0 0 6px var(--beam-violet));
   }
 
   &.selected .ring {
-    opacity: 1;
+    display: inline;
   }
 
   &.hidden-marker {
