@@ -1,15 +1,18 @@
 import { batch, computed, signal } from "@preact/signals";
 
 import { readCharacterName, readPlayerCharacter, type Character, type ItemRecord } from "./character.ts";
+import type { Requirement } from "./game/requirement.ts";
+import { journalLorePages, loreCategories } from "./journal-lore.ts";
 import { orderedLocations, shortName, type LocationKind } from "./locations.ts";
-import { loreCategories, lorePages, loreRegions, type LorePage } from "./lore.ts";
+import { loreRegions, type LorePage } from "./lore.ts";
 import type { PlaceType } from "./places.ts";
-import { fogSize, readBlock, readFog, readKnowledge } from "./save.ts";
+import { holds, type Knowledge } from "./requirement.ts";
+import { fogSize, readBlock, readFog, readKnowledge, readWorldKnowledge, saveKind } from "./save.ts";
 import { flyTo, toMapX, toMapY, view } from "./viewport.ts";
 
 export type LocationState = "unknown" | "found" | "missing";
 export type ListMode = "missing" | "all";
-export type Layer = "flames" | "lore" | "places";
+export type Layer = "flames" | "lore" | "places" | "quests";
 export type LoreGrouping = "region" | "journal";
 
 // A pin is one marker on the map and one row in the list.
@@ -17,6 +20,8 @@ export type Pin = {
   readonly key: string;
   readonly layer: Layer;
   readonly knowledgeId: number | null;
+  // For a place from the game's map markers: the rule that marks it discovered.
+  readonly discovered?: Requirement;
   readonly title: string;
   readonly group: string;
   readonly east: number;
@@ -47,7 +52,7 @@ export const flamePins: readonly Pin[] = orderedLocations.map((location) => ({
   kind: location.kind,
 }));
 
-export const lorePins: readonly Pin[] = lorePages.map((page, index) => ({
+export const lorePins: readonly Pin[] = journalLorePages.map((page, index) => ({
   key: `lore-${index}`,
   layer: "lore",
   knowledgeId: page.knowledgeId,
@@ -59,73 +64,104 @@ export const lorePins: readonly Pin[] = lorePages.map((page, index) => ({
   page,
 }));
 
-// Places load on demand: the list holds about 4,000 points and 40 icons.
+// Places load on demand: the list holds about 4,600 points and 40 icons. The game's map markers come first, so zoomed out they
+// win the spots they share with community places.
 export const placePins = signal<readonly Pin[] | null>(null);
 export const visiblePlaceTypes = signal<ReadonlySet<string>>(new Set());
 let placesLoading: Promise<void> | null = null;
 
 export function loadPlaces() {
-  placesLoading ??= Promise.all([import("./places.ts"), import("./place-icons.ts")]).then(([{ placeRegions, placeRows, placeTypes }, { placeIconUrl }]) => {
-    const pins = placeRows.map(([typeIndex, title, description, east, north, altitude, regionIndex, level], index): Pin => {
-      const type = placeTypes[typeIndex]!;
-      return {
-        key: `place-${index}`,
+  placesLoading ??= Promise.all([import("./places.ts"), import("./place-icons.ts"), import("./game-places.ts")]).then(
+    ([{ placeRegions, placeRows, placeTypes }, { placeIconUrl }, { gamePlaces, gamePlaceTypes }]) => {
+      const discoveries = gamePlaces.map((place, index): Pin => ({
+        key: `discovery-${index}`,
         layer: "places",
         knowledgeId: null,
-        title,
-        group: type.label,
-        east,
-        north,
-        altitude,
-        place: { type, iconUrl: placeIconUrl(type.icon), description, region: placeRegions[regionIndex] ?? "", level },
-      };
-    });
+        discovered: place.discovered,
+        title: place.title,
+        group: place.type.label,
+        east: place.east,
+        north: place.north,
+        altitude: place.altitude,
+        place: { type: place.type, iconUrl: placeIconUrl(place.icon), description: "", region: place.region, level: 0 },
+      }));
+      const community = placeRows.map(([typeIndex, title, description, east, north, altitude, regionIndex, level], index): Pin => {
+        const type = placeTypes[typeIndex]!;
+        return {
+          key: `place-${index}`,
+          layer: "places",
+          knowledgeId: null,
+          title,
+          group: type.label,
+          east,
+          north,
+          altitude,
+          place: { type, iconUrl: placeIconUrl(type.icon), description, region: placeRegions[regionIndex] ?? "", level },
+        };
+      });
 
-    batch(() => {
-      placePins.value = pins;
-      visiblePlaceTypes.value = new Set(placeTypes.filter((type) => type.shownByDefault).map((type) => type.id));
-    });
-  });
+      batch(() => {
+        placePins.value = [...discoveries, ...community];
+        visiblePlaceTypes.value = new Set([...gamePlaceTypes, ...placeTypes].filter((type) => type.shownByDefault).map((type) => type.id));
+      });
+    },
+  );
 
   return placesLoading;
 }
 
-export const pinsOf = (layer: Layer) => (layer === "flames" ? flamePins : layer === "lore" ? lorePins : (placePins.value ?? []));
+export const pinsOf = (layer: Layer) =>
+  layer === "flames" ? flamePins : layer === "lore" ? lorePins : layer === "places" ? (placePins.value ?? []) : ([] as readonly Pin[]);
 
-const trackedIds = new Set([...flamePins, ...lorePins].flatMap((pin) => (pin.knowledgeId === null ? [] : [pin.knowledgeId])));
+// The save is kept in localStorage: the character's knowledge as [id, value] pairs, and the world's when one is loaded.
+// Saves stored by earlier versions of the page hold the found flame and lore ids under "found". Those still show flames; lore,
+// places and quests wait until the save loads again.
+const knowledgeStorageKey = "knowledge";
+const worldStorageKey = "world-knowledge";
+const worldNameStorageKey = "world-name";
+const legacyStorageKeys = ["found", "lore-tracked"];
 
-const foundStorageKey = "found";
-// Saves stored before lore tracking hold flame ids only. Lore pages stay "unknown" until the save loads again.
-const loreStorageKey = "lore-tracked";
-
-function readStoredSave() {
+function readStoredPairs(key: string): Map<number, number> | null {
   try {
-    const storedIds: unknown = JSON.parse(localStorage.getItem(foundStorageKey) ?? "null");
-    if (Array.isArray(storedIds)) {
-      return {
-        ids: new Set(storedIds.filter((id) => typeof id === "number")),
-        tracksLore: localStorage.getItem(loreStorageKey) === "1",
-      };
+    const pairs: unknown = JSON.parse(localStorage.getItem(key) ?? "null");
+    if (Array.isArray(pairs)) {
+      return new Map(pairs.filter((pair): pair is [number, number] => Array.isArray(pair) && typeof pair[0] === "number" && typeof pair[1] === "number"));
     }
   } catch {
     // Private windows and blocked storage throw here. The page then starts with no save.
   }
-
   return null;
 }
 
-const storedSave = readStoredSave();
+function readStoredKnowledge(): { knowledge: Map<number, number>; current: boolean } | null {
+  const knowledge = readStoredPairs(knowledgeStorageKey);
+  if (knowledge) {
+    return { knowledge, current: true };
+  }
 
-// The explored grid is kept as a PNG data URL: the raw grid is 1.6 MB, the PNG a small part of it.
-const fogStorageKey = "fog";
-
-function readStoredFog() {
   try {
-    return localStorage.getItem(fogStorageKey);
+    const ids: unknown = JSON.parse(localStorage.getItem("found") ?? "null");
+    if (Array.isArray(ids)) {
+      return { knowledge: new Map(ids.filter((id) => typeof id === "number").map((id) => [id, 1])), current: false };
+    }
+  } catch {
+    // As above.
+  }
+  return null;
+}
+
+function readStoredText(key: string) {
+  try {
+    return localStorage.getItem(key);
   } catch {
     return null;
   }
 }
+
+const storedKnowledge = readStoredKnowledge();
+
+// The explored grid is kept as a PNG data URL: the raw grid is 1.6 MB, the PNG a small part of it.
+const fogStorageKey = "fog";
 
 // The character is kept as JSON. Its Equipped map is stored as [position, item] pairs.
 const characterStorageKey = "character";
@@ -185,10 +221,15 @@ function fogImage(grid: Uint8Array) {
   return canvas.toDataURL("image/png");
 }
 
-export const foundIds = signal<ReadonlySet<number> | null>(storedSave?.ids ?? null);
-export const saveTracksLore = signal(storedSave?.tracksLore ?? false);
-export const fogUrl = signal<string | null>(storedSave ? readStoredFog() : null);
-export const character = signal<Character | null>(storedSave ? readStoredCharacter() : null);
+// The character's knowledge, id to value. null until a character save loads.
+export const knowledge = signal<Knowledge | null>(storedKnowledge?.knowledge ?? null);
+// false for a save stored by an earlier version of the page, which kept only flame and lore ids.
+export const knowledgeIsCurrent = signal(storedKnowledge?.current ?? false);
+export const worldKnowledge = signal<Knowledge | null>(readStoredPairs(worldStorageKey));
+export const worldName = signal(readStoredText(worldNameStorageKey) ?? "");
+export const hasSave = computed(() => knowledge.value !== null);
+export const fogUrl = signal<string | null>(storedKnowledge ? readStoredText(fogStorageKey) : null);
+export const character = signal<Character | null>(storedKnowledge ? readStoredCharacter() : null);
 export const characterError = signal("");
 export const showFog = signal(true);
 export const activeLayer = signal<Layer>("flames");
@@ -203,12 +244,21 @@ export const visibleKinds = signal<Record<LocationKind, boolean>>({
 });
 
 export function stateOf(pin: Pin): LocationState {
-  const ids = foundIds.value;
-  if (!ids || pin.knowledgeId === null || (pin.layer === "lore" && !saveTracksLore.value)) {
+  const known = knowledge.value;
+  if (!known || (pin.layer !== "flames" && !knowledgeIsCurrent.value)) {
     return "unknown";
   }
 
-  return ids.has(pin.knowledgeId) ? "found" : "missing";
+  if (pin.discovered) {
+    const result = holds(pin.discovered, known, null);
+    return result === null ? "unknown" : result ? "found" : "missing";
+  }
+
+  if (pin.knowledgeId === null) {
+    return "unknown";
+  }
+
+  return known.has(pin.knowledgeId) ? "found" : "missing";
 }
 
 const matchesQuery = (pin: Pin, query: string) =>
@@ -233,11 +283,7 @@ export function isShown(pin: Pin) {
 export const groupOf = (pin: Pin) => (pin.page && loreGrouping.value === "region" ? pin.page.region : pin.group);
 
 const groupOrder = (pin: Pin) =>
-  pin.page
-    ? loreGrouping.value === "region"
-      ? (loreRegions as readonly string[]).indexOf(pin.page.region)
-      : (loreCategories as readonly string[]).indexOf(pin.page.category)
-    : 0;
+  pin.page ? (loreGrouping.value === "region" ? (loreRegions as readonly string[]).indexOf(pin.page.region) : loreCategories.indexOf(pin.page.category)) : 0;
 
 export const activePins = computed(() => {
   const pins = pinsOf(activeLayer.value);
@@ -250,8 +296,8 @@ export const stepPins = computed(() => shownPins.value.filter((pin) => stateOf(p
 
 export const foundCount = computed(() => activePins.value.filter((pin) => stateOf(pin) === "found").length);
 
-// Pages without a knowledge id never count as found, so the total leaves them out once a save is loaded.
-export const checkableCount = computed(() => activePins.value.filter((pin) => pin.knowledgeId !== null).length);
+// Pins a save can check: flames and lore pages by id, game map markers by rule.
+export const checkableCount = computed(() => activePins.value.filter((pin) => pin.knowledgeId !== null || pin.discovered).length);
 
 export function selectPin(pin: Pin | null, fly: boolean) {
   selectedPin.value = pin;
@@ -290,42 +336,80 @@ export function stepBy(direction: 1 | -1) {
   selectPin(steps[nextIndex]!, true);
 }
 
-export async function loadSave(file: File) {
+function store(write: () => void) {
+  try {
+    write();
+  } catch {
+    // Blocked or full storage only stops the save from loading again on the next visit.
+  }
+}
+
+function loadCharacterSave(save: Uint8Array) {
+  const known = readKnowledge(save);
+  const grid = readFog(save);
+  const fog = grid ? fogImage(grid) : null;
+  const read = readCharacter(save);
+
+  batch(() => {
+    knowledge.value = known;
+    knowledgeIsCurrent.value = true;
+    fogUrl.value = fog;
+    character.value = read.character;
+    characterError.value = read.error;
+    selectedPin.value = null;
+  });
+
+  store(() => {
+    for (const key of legacyStorageKeys) {
+      localStorage.removeItem(key);
+    }
+    localStorage.setItem(knowledgeStorageKey, JSON.stringify([...known]));
+    if (read.character) {
+      localStorage.setItem(characterStorageKey, JSON.stringify({ ...read.character, equipped: [...read.character.equipped] }));
+    } else {
+      localStorage.removeItem(characterStorageKey);
+    }
+    if (fog) {
+      localStorage.setItem(fogStorageKey, fog);
+    } else {
+      localStorage.removeItem(fogStorageKey);
+    }
+  });
+}
+
+function loadWorldSave(save: Uint8Array, name: string) {
+  const known = readWorldKnowledge(save);
+
+  batch(() => {
+    worldKnowledge.value = known;
+    worldName.value = name;
+  });
+
+  store(() => {
+    localStorage.setItem(worldStorageKey, JSON.stringify([...known]));
+    localStorage.setItem(worldNameStorageKey, name);
+  });
+}
+
+// Loads a character save, a world save, or one of each. A world save adds the world's quests to the character's.
+export async function loadSaves(files: readonly File[]) {
   errorMessage.value = "";
 
   try {
-    const save = new Uint8Array(await file.arrayBuffer());
-    const knowledgeIds = readKnowledge(save);
-    const ids = new Set([...trackedIds].filter((id) => knowledgeIds.has(id)));
-    const grid = readFog(save);
-    const fog = grid ? fogImage(grid) : null;
-    const read = readCharacter(save);
+    const saves = await Promise.all(files.map(async (file) => ({ name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) })));
+    const kinds = saves.map((save) => saveKind(save.bytes));
+    const unknown = saves.find((_, index) => kinds[index] === null);
+    if (unknown) {
+      throw new Error(`${unknown.name} holds neither character nor world knowledge. Select characterN.ksd, and worldN.ksd for world quests.`);
+    }
 
-    batch(() => {
-      foundIds.value = ids;
-      saveTracksLore.value = true;
-      fogUrl.value = fog;
-      character.value = read.character;
-      characterError.value = read.error;
-      selectedPin.value = null;
-    });
-
-    try {
-      localStorage.setItem(foundStorageKey, JSON.stringify([...ids]));
-      localStorage.setItem(loreStorageKey, "1");
-      if (read.character) {
-        localStorage.setItem(characterStorageKey, JSON.stringify({ ...read.character, equipped: [...read.character.equipped] }));
-      } else {
-        localStorage.removeItem(characterStorageKey);
-      }
-      if (fog) {
-        localStorage.setItem(fogStorageKey, fog);
-      } else {
-        localStorage.removeItem(fogStorageKey);
-        localStorage.removeItem(characterStorageKey);
-      }
-    } catch {
-      // Blocked storage only stops the save from loading again on the next visit.
+    const characterSave = saves.find((_, index) => kinds[index] === "character");
+    const worldSave = saves.find((_, index) => kinds[index] === "world");
+    if (characterSave) {
+      loadCharacterSave(characterSave.bytes);
+    }
+    if (worldSave) {
+      loadWorldSave(worldSave.bytes, worldSave.name);
     }
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : String(error);
@@ -334,20 +418,20 @@ export async function loadSave(file: File) {
 
 export function forgetSave() {
   batch(() => {
-    foundIds.value = null;
-    saveTracksLore.value = false;
+    knowledge.value = null;
+    knowledgeIsCurrent.value = false;
+    worldKnowledge.value = null;
+    worldName.value = "";
     fogUrl.value = null;
     character.value = null;
     characterError.value = "";
   });
 
-  try {
-    localStorage.removeItem(foundStorageKey);
-    localStorage.removeItem(loreStorageKey);
-    localStorage.removeItem(fogStorageKey);
-  } catch {
-    // Blocked storage holds no save to remove.
-  }
+  store(() => {
+    for (const key of [knowledgeStorageKey, worldStorageKey, worldNameStorageKey, fogStorageKey, characterStorageKey, ...legacyStorageKeys]) {
+      localStorage.removeItem(key);
+    }
+  });
 }
 
 export function pickSaveFile() {
@@ -355,10 +439,10 @@ export function pickSaveFile() {
 
   input.type = "file";
   input.accept = ".ksd";
+  input.multiple = true;
   input.addEventListener("change", () => {
-    const file = input.files?.[0];
-    if (file) {
-      void loadSave(file);
+    if (input.files?.length) {
+      void loadSaves([...input.files]);
     }
   });
   input.click();

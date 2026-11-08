@@ -1,4 +1,4 @@
-import { useSignal } from "@preact/signals";
+import { signal, useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
 
 import flameIconUrl from "./assets/flame-shrine.png";
@@ -14,14 +14,14 @@ import {
   fogUrl,
   forgetSave,
   foundCount,
-  foundIds,
   groupOf,
+  hasSave,
+  knowledgeIsCurrent,
   listMode,
-  loadSave,
+  loadSaves,
   loreGrouping,
   pickSaveFile,
   placePins,
-  saveTracksLore,
   searchQuery,
   selectedPin,
   selectPin,
@@ -31,6 +31,7 @@ import {
   stateOf,
   visibleKinds,
   visiblePlaceTypes,
+  worldKnowledge,
   type Layer,
   type ListMode,
   type LoreGrouping,
@@ -49,6 +50,10 @@ const layers: { value: Layer; label: string }[] = [
   {
     value: "places",
     label: "Places",
+  },
+  {
+    value: "quests",
+    label: "Quests",
   },
 ];
 
@@ -85,27 +90,47 @@ const kindToggles: { kind: LocationKind; label: string }[] = [
   },
 ];
 
+const layerNouns: Record<Layer, [string, string]> = {
+  flames: ["flames", "lit"],
+  lore: ["lore pages", "read"],
+  places: ["places", "discovered"],
+  quests: ["quests", "done"],
+};
+
+// The quest list and its data load when the Quests layer first opens.
+const questModule = signal<typeof import("./quest-list.tsx") | null>(null);
+
+function openLayer(layer: Layer) {
+  setLayer(layer);
+  if (layer === "quests" && !questModule.peek()) {
+    void import("./quest-list.tsx").then((module) => (questModule.value = module));
+  }
+}
+
 function statusText() {
-  const isLore = activeLayer.value === "lore";
+  const layer = activeLayer.value;
+  const [noun, verb] = layerNouns[layer];
 
-  if (activeLayer.value === "places") {
-    return placePins.value ? `${shownPins.value.length} / ${placePins.value.length} places` : "Loading places";
+  if (layer === "places" && !placePins.value) {
+    return "Loading places";
   }
 
-  if (foundIds.value === null) {
-    return `${activePins.value.length} ${isLore ? "lore pages" : "flames"}`;
+  if (layer === "quests") {
+    return questModule.value?.questStatus() ?? "Loading quests";
   }
 
-  if (isLore && !saveTracksLore.value) {
-    return "Load the save again to check lore";
+  if (!hasSave.value || (layer !== "flames" && !knowledgeIsCurrent.value)) {
+    return layer === "places"
+      ? `${shownPins.value.length} / ${placePins.value!.length} places`
+      : hasSave.value
+        ? `Load the save again to check ${noun}`
+        : `${activePins.value.length} ${noun}`;
   }
 
-  return `${foundCount} / ${checkableCount} ${isLore ? "read" : "lit"}`;
+  return `${foundCount} / ${checkableCount} ${verb}`;
 }
 
 function TopBar() {
-  const hasSave = foundIds.value !== null;
-
   return (
     <header class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2.5 border-b border-line bg-sheet px-4 py-2.5">
       <div class="flex min-w-0 items-center gap-2.5">
@@ -114,11 +139,11 @@ function TopBar() {
       </div>
       <div class="flex flex-wrap items-center gap-2">
         <span class="status tabular-nums">
-          <span class={`dot ${hasSave ? "dot-found" : ""}`} />
+          <span class={`dot ${hasSave.value ? "dot-found" : ""}`} />
           {statusText()}
         </span>
         <CharacterButton />
-        {hasSave ? (
+        {hasSave.value || worldKnowledge.value ? (
           <button class="btn btn-glass btn-sm" onClick={forgetSave}>
             Reset loaded save
           </button>
@@ -141,7 +166,8 @@ function SaveHelp() {
     <div id="save-help" popover class="save-help floating menu-in">
       <h2 class="mb-2 text-sm font-semibold text-primary">Where to find your save</h2>
       <p class="mb-2">
-        Load a <code>characterN.ksd</code> file. A <code>worldN.ksd</code> file does not hold character data.
+        Load a <code>characterN.ksd</code> file. To track world quests too, select the <code>worldN.ksd</code> of the world you play together with it (or drop
+        both files at once).
       </p>
       <ul class="mb-2 grid list-disc gap-1.5 pl-4">
         <li>
@@ -318,8 +344,8 @@ function Filters() {
 
   return (
     <div class="grid gap-2 border-b border-line p-3">
-      <Track label="Layer" options={layers} value={layer} onChange={setLayer} />
-      {layer !== "places" && <Track label="Show" options={listModes} value={listMode.value} onChange={(value) => (listMode.value = value)} />}
+      <Track label="Layer" options={layers} value={layer} onChange={openLayer} />
+      <Track label="Show" options={listModes} value={listMode.value} onChange={(value) => (listMode.value = value)} />
       {layer === "flames" && (
         <div class="grid grid-cols-2 gap-1.5" role="group" aria-label="Types">
           {kindToggles.map(({ kind, label }) => (
@@ -351,14 +377,19 @@ function Filters() {
           <PlaceTypeFilters />
         </>
       )}
+      {layer === "quests" && <SearchBox label="Search quests" />}
       <FogToggle />
     </div>
   );
 }
 
 function emptyText() {
-  if (listMode.value === "missing" && foundIds.value !== null) {
-    return activeLayer.value === "lore" ? "Nothing missing here. Every lore page is read." : "Nothing missing here. Every flame is lit.";
+  if (listMode.value === "missing" && hasSave.value) {
+    return activeLayer.value === "lore"
+      ? "Nothing missing here. Every lore page is read."
+      : activeLayer.value === "places"
+        ? "Nothing missing here. Every place shown is discovered."
+        : "Nothing missing here. Every flame is lit.";
   }
 
   if (activeLayer.value === "places") {
@@ -380,7 +411,13 @@ function Sidebar() {
             {errorMessage}
           </p>
         )}
-        {rows.length === 0 ? (
+        {activeLayer.value === "quests" ? (
+          questModule.value ? (
+            <questModule.value.QuestList />
+          ) : (
+            <p class="px-4 py-6 text-[13px] leading-4.5 text-muted">Loading quests…</p>
+          )
+        ) : rows.length === 0 ? (
           <p class="px-4 py-6 text-[13px] leading-4.5 text-muted">{emptyText()}</p>
         ) : (
           <div class="p-1.5">
@@ -456,9 +493,9 @@ function Dropzone() {
         dragDepth = 0;
         visible.value = false;
 
-        const file = event.dataTransfer?.files[0];
-        if (file) {
-          void loadSave(file);
+        const files = [...(event.dataTransfer?.files ?? [])];
+        if (files.length) {
+          void loadSaves(files);
         }
       },
       { signal },

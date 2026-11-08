@@ -1,6 +1,7 @@
 import type { ComponentChildren } from "preact";
 
-import { equipmentPositions, type ItemRecord } from "./character.ts";
+import { equipmentPositions, type ItemRecord, type Skill } from "./character.ts";
+import { gameSkills } from "./game/skills.ts";
 import { character, characterError, itemNames, loadItemNames } from "./state.ts";
 
 const numberFormat = new Intl.NumberFormat("en");
@@ -55,6 +56,47 @@ function Section({ title, children }: { title: string; children: ComponentChildr
   );
 }
 
+const skillsById = new Map(gameSkills.map((skill) => [skill.id, skill]));
+
+// Attribute nodes repeat across the tree (Dexterity, Spirit, …), so they show as totals. Abilities and passives show by name.
+function Skills({ skills }: { skills: readonly Skill[] }) {
+  const named = skills.map((skill) => ({ ...skill, game: skillsById.get(skill.id) }));
+  const attributes = [
+    ...Map.groupBy(
+      named.filter((skill) => skill.game?.kind === "Attribute"),
+      (skill) => skill.game!.name,
+    ),
+  ].map(([name, nodes]) => `${name} +${nodes.reduce((sum, node) => sum + node.rank, 0)}`);
+  const unknown = named.filter((skill) => !skill.game).length;
+
+  return (
+    <>
+      {attributes.length > 0 && <p class="text-primary">{attributes.join(" · ")}</p>}
+      {(["Ability", "Passive"] as const).map((kind) => {
+        const rows = named.filter((skill) => skill.game?.kind === kind);
+        return (
+          rows.length > 0 && (
+            <ul key={kind} class="grid gap-0.5">
+              {rows.map((skill) => (
+                <li key={skill.id} class="item-row">
+                  <span class="mono-caption item-label">{kind}</span>
+                  <span class="min-w-0 flex-1 truncate text-primary">{skill.game!.name}</span>
+                  {skill.game!.maxRank > 1 && (
+                    <span class="mono-caption shrink-0 tabular-nums">
+                      {skill.rank}/{skill.game!.maxRank}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )
+        );
+      })}
+      {unknown > 0 && <p class="text-muted">{unknown} skills this version of the game data does not know.</p>}
+    </>
+  );
+}
+
 function CharacterDetails() {
   const current = character.value!;
   const skillPoints = current.skills.reduce((sum, skill) => sum + skill.rank, 0);
@@ -71,9 +113,9 @@ function CharacterDetails() {
 
       <Section title="Skills">
         <p>
-          {current.skills.length} skills unlocked, {skillPoints} skill points spent.{" "}
-          <span class="text-muted">Skill names need the game data, which the page does not have yet.</span>
+          {current.skills.length} skills unlocked, {skillPoints} skill points spent.
         </p>
+        <Skills skills={current.skills} />
       </Section>
 
       {equipmentGroups.map(({ label, positions }) => (

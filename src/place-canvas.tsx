@@ -2,7 +2,7 @@ import { effect } from "@preact/signals";
 import type { RefObject } from "preact";
 import { useEffect, useRef } from "preact/hooks";
 
-import { activeLayer, selectedPin, shownPins, type Pin } from "./state.ts";
+import { activeLayer, knowledge, selectedPin, shownPins, stateOf, type Pin } from "./state.ts";
 import { frameSize, toMapX, toMapY, view } from "./viewport.ts";
 
 // The Places layer can show thousands of points. SVG <image> markers made zooming slow from a few hundred on, so places are drawn
@@ -81,6 +81,8 @@ export function usePlaceCanvas(canvasRef: RefObject<HTMLCanvasElement | null>) {
 
         const image = imageOf(pin.place!.iconUrl, schedule);
         if (image.complete && image.naturalWidth) {
+          // Discovered places fade, so the undiscovered ones stand out.
+          context.globalAlpha = pin.discovered && stateOf(pin) === "found" ? 0.4 : 1;
           context.drawImage(image, x - iconSize / 2, y - iconSize / 2, iconSize, iconSize);
         }
         drawn.current.push({ pin, x, y });
@@ -98,6 +100,7 @@ export function usePlaceCanvas(canvasRef: RefObject<HTMLCanvasElement | null>) {
       void shownPins.value;
       void selectedPin.value;
       void activeLayer.value;
+      void knowledge.value;
       schedule();
     });
 

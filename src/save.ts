@@ -40,11 +40,12 @@ export function readBlock(save: Uint8Array, name: string): Uint8Array | null {
   return block ? payloadOf(block, name) : null;
 }
 
-// The player_knowledge payload is: u32 state, u32 count, count ids, count values.
-export function readKnowledge(save: Uint8Array): Set<number> {
-  const block = readBlocks(save).get("player_knowledge");
-  if (!block) {
-    throw new Error("This file holds no character knowledge. It can be a world save. Select characterN.ksd.");
+// A knowledge payload (player_knowledge of a character, world_knowledge of a world) is: u32 state, u32 count, count ids,
+// count values. A value is 1 for a Bool, a set of bits for flags, or a count.
+// An empty block holds no knowledge yet.
+function knowledgeOf(block: Uint8Array): Map<number, number> {
+  if (block.length === 0) {
+    return new Map();
   }
 
   const payload = payloadOf(block, "knowledge");
@@ -54,7 +55,35 @@ export function readKnowledge(save: Uint8Array): Set<number> {
     throw new Error("The save is damaged: its knowledge block has an unexpected size.");
   }
 
-  return new Set(Array.from({ length: idCount }, (_, idIndex) => payloadView.getUint32(8 + 4 * idIndex, true)));
+  return new Map(
+    Array.from({ length: idCount }, (_, idIndex) => [payloadView.getUint32(8 + 4 * idIndex, true), payloadView.getUint32(8 + 4 * (idCount + idIndex), true)]),
+  );
+}
+
+// The character's knowledge: id to value.
+export function readKnowledge(save: Uint8Array): Map<number, number> {
+  const block = readBlocks(save).get("player_knowledge");
+  if (!block) {
+    throw new Error("This file holds no character knowledge. It can be a world save. Select characterN.ksd.");
+  }
+
+  return knowledgeOf(block);
+}
+
+// A save is a character save (player_knowledge), a world save (world_knowledge), or neither.
+export function saveKind(save: Uint8Array): "character" | "world" | null {
+  const blocks = readBlocks(save);
+  return blocks.has("player_knowledge") ? "character" : blocks.has("world_knowledge") ? "world" : null;
+}
+
+// The world's knowledge: the quests and events of the world, whoever was there.
+export function readWorldKnowledge(save: Uint8Array): Map<number, number> {
+  const block = readBlocks(save).get("world_knowledge");
+  if (!block) {
+    throw new Error("This file holds no world knowledge. Select worldN.ksd.");
+  }
+
+  return knowledgeOf(block);
 }
 
 export const fogSize = 1280;

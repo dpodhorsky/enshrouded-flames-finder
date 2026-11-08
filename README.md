@@ -1,8 +1,8 @@
 # Flame Shrine Finder
 
-A map of the Flame Shrines and lore pages in Enshrouded. Drop a `characterN.ksd` save file on the page to see which shrines you have found and which lore pages you have read, and which ones you have yet to discover.
+A map of the Flame Shrines, lore pages and places of Enshrouded, with the quest journal. Drop a `characterN.ksd` save file on the page to see which shrines you have found, which lore pages you have read, which places you have discovered and which quests you have done. Drop the `worldN.ksd` of the world you play together with it to count world quests too.
 
-Switch between the **Flames**, **Lore** and **Places** layers in the sidebar. A loaded save also shades the areas the character has not explored yet (the save's fog of war); turn it off with **Shade unexplored areas**. The lore layer lists 517 pages across all eight regions (Springlands, Revelwood, Nomad Highlands, Blackmire, Albaneve Summits, Kindlewastes, Veilwater Basin and Cinder's Cradle), grouped by region or by journal category, with a search box and a hint for where each page is. 45 of those pages have no known save id yet, so a save cannot tell whether they are read. They always show as not checked.
+Switch between the **Flames**, **Lore**, **Places** and **Quests** layers in the sidebar. A loaded save also shades the areas the character has not explored yet (the save's fog of war); turn it off with **Shade unexplored areas**. The lore layer lists the 520 journal pages the game places in the world, across all eight regions (Springlands, Revelwood, Nomad Highlands, Blackmire, Albaneve Summits, Kindlewastes, Veilwater Basin and Cinder's Cradle), grouped by region or by journal category, with a search box and, for about 110 pages, a hint for where the page is. Five more pages are not placed in the world (a quest hands them over, for example), so they are not on the map.
 
 ## Where to find the character save
 
@@ -17,9 +17,11 @@ On a shared PC with Steam Cloud on, each Steam account has its own `userdata` fo
 
 More information: [Enshrouded save management](https://saraserenity.net/enshrouded/manage_saves.php?action=general#save_location).
 
-The **Places** layer shows about 4,200 points of interest of 40 types: Ancient Spires, Vaults, Night Sanctums, dungeons, villages, camps, bosses, chests, collectibles, secret doors and more. Pick the types under **Types**. Chests, collectibles, bosses, enemy camps and Shroud Roots start hidden. Zoomed out, nearby places are thinned to one per spot, so zoom in to see them all. The save does not tell which places you have found yet.
+The **Places** layer shows about 4,600 points of interest. 364 of them come from the game's own map markers, under **Discoveries**: villages, ruins, dungeons, lairs, Flame sites and hints. A save tells whether the character has discovered each one; discovered ones fade on the map, and **Missing** lists only the others. The rest come from the community map, in 40 types: Ancient Spires, Vaults, Night Sanctums, dungeons, villages, camps, bosses, chests, collectibles, secret doors and more. The save cannot tell which of those you have found. Pick the types under **Types**. Chests, collectibles, bosses, enemy camps and Shroud Roots start hidden. Zoomed out, nearby places are thinned to one per spot, so zoom in to see them all.
 
-The **character button** in the top bar (it shows the name and level once a save is loaded) opens the character: level and XP, how many skills are unlocked, the equipped gear and what the character carries, with item names. Skill names are not shown yet: they need the game's own data.
+The **Quests** layer lists the journal's 188 quests by who gives them, with each quest's steps. With a save loaded, each quest shows as done, in progress or not started, and each step as done, current or not reached. Most quests are kept in both the world and the character save, but some only in the world save, so load both for a full count. Some steps ask for an NPC's state, which saves do not hold; for those the page goes by whether the journal shows the next step.
+
+The **character button** in the top bar (it shows the name and level once a save is loaded) opens the character: level and XP, the unlocked skills by name with their ranks, the equipped gear and what the character carries, with item names.
 
 ## Lore and place data
 
@@ -31,6 +33,17 @@ curl -o /tmp/regions.json https://static.allthings.how/game-maps/enshrouded/embe
 bun scripts/import-data.ts /tmp/eim/app/public/data.json /tmp/regions.json
 bun run format
 ```
+
+## Game data
+
+`src/game/` is generated from the game's own files by `scripts/import-game.ts`: skill names, the journal's lore pages with their save ids and places, the map markers with the knowledge that marks them discovered, and the quests with each step's rules. It reads the resources that [kfc-parser](https://github.com/Brabb3l/kfc-parser) unpacks (`kfc-parser unpack`, which only reads the game files) and the English texts from the game folder:
+
+```sh
+bun scripts/import-game.ts <unpacked folder> <Enshrouded folder> --check <characterN.ksd> <worldN.ksd>
+bun run format
+```
+
+`--check` prints how the data reads a character and a world save. The page takes each lore page's region and hint from the community data above, by the page's title and position.
 
 ## Development
 

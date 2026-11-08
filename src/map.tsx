@@ -7,7 +7,7 @@ import mapImageUrl from "./assets/map.webp";
 import { locationsOfRegion, regions } from "./locations.ts";
 import { LoreSymbols } from "./lore-icon.tsx";
 import { usePlaceCanvas } from "./place-canvas.tsx";
-import { activeLayer, activePins, fogUrl, foundIds, groupOf, isShown, selectedPin, selectPin, showFog, stateOf, stepBy, stepPins, type Pin } from "./state.ts";
+import { activeLayer, activePins, fogUrl, groupOf, hasSave, isShown, selectedPin, selectPin, showFog, stateOf, stepBy, stepPins, type Pin } from "./state.ts";
 import {
   clampWidth,
   flyTo,
@@ -53,6 +53,11 @@ const stateWords = {
 const loreStateWords = {
   missing: "Unread",
   found: "Read",
+  unknown: "Not checked",
+} as const;
+const placeStateWords = {
+  missing: "Not discovered",
+  found: "Discovered",
   unknown: "Not checked",
 } as const;
 
@@ -361,7 +366,6 @@ function PinDetails({ pin }: { pin: Pin }) {
         </p>
       )}
       {page.hint && <p>{page.hint}</p>}
-      {page.knowledgeId === null && <p class="text-muted">The save id of this page is not known yet, so a save cannot tell whether it is read.</p>}
     </div>
   );
 }
@@ -395,10 +399,10 @@ function Popover() {
       </div>
       <div class="flex flex-wrap items-center justify-between gap-2.5">
         <h2 class={`title text-primary ${selected.layer === "flames" ? "" : "text-lg!"}`}>{selected.title}</h2>
-        {selected.layer !== "places" && (
+        {(selected.layer !== "places" || selected.discovered) && (
           <span class="status">
             <span class={`dot dot-${state}`} />
-            {selected.layer === "lore" ? loreStateWords[state] : stateWords[state]}
+            {(selected.layer === "lore" ? loreStateWords : selected.layer === "places" ? placeStateWords : stateWords)[state]}
           </span>
         )}
       </div>
@@ -412,7 +416,7 @@ function Popover() {
         </button>
         <span class="mono-label tabular-nums">{position >= 0 ? `${position + 1} / ${steps.length}` : ""}</span>
         <button class="btn btn-action btn-sm" disabled={isAlone} onClick={() => stepBy(1)}>
-          Next{foundIds.value && selected.layer !== "places" ? " missing" : ""}
+          Next{hasSave.value && selected.layer !== "places" ? " missing" : ""}
         </button>
       </div>
     </div>
