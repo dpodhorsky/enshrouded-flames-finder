@@ -1,6 +1,6 @@
 import { batch, computed, signal } from "@preact/signals";
 
-import { readCharacterName, readPlayerCharacter, type Character, type ItemRecord } from "./character.ts";
+import { readCharacterName, readCustomMarkers, readPlayerCharacter, type Character, type ItemRecord } from "./character.ts";
 import type { Requirement } from "./game/requirement.ts";
 import { journalLorePages, loreCategories } from "./journal-lore.ts";
 import { orderedLocations, shortName, type LocationKind } from "./locations.ts";
@@ -185,7 +185,7 @@ function readCharacter(save: Uint8Array): { character: Character | null; error: 
     if (!data || !player) {
       return { character: null, error: "This save has no character data." };
     }
-    return { character: { name: readCharacterName(data), ...readPlayerCharacter(player) }, error: "" };
+    return { character: { name: readCharacterName(data), ...readPlayerCharacter(player), markers: readCustomMarkers(data) }, error: "" };
   } catch (error) {
     return { character: null, error: error instanceof Error ? error.message : String(error) };
   }

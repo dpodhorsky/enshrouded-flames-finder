@@ -3,12 +3,14 @@ import { useEffect } from "preact/hooks";
 
 import flameIconUrl from "./assets/flame-shrine.png";
 import { CharacterButton } from "./character-panel.tsx";
+import { showCustomMarkers } from "./custom-markers.tsx";
 import { type LocationKind } from "./locations.ts";
 import { LoreIcon } from "./lore-icon.tsx";
 import { MapView } from "./map.tsx";
 import {
   activeLayer,
   activePins,
+  character,
   checkableCount,
   errorMessage,
   fogUrl,
@@ -339,6 +341,19 @@ function FogToggle() {
   );
 }
 
+function CustomMarkersToggle() {
+  const count = character.value?.markers?.length ?? 0;
+  if (!count) {
+    return null;
+  }
+
+  return (
+    <button class="chip justify-center" aria-pressed={showCustomMarkers.value} onClick={() => (showCustomMarkers.value = !showCustomMarkers.value)}>
+      Show my map markers · {count}
+    </button>
+  );
+}
+
 function Filters() {
   const layer = activeLayer.value;
 
@@ -379,6 +394,7 @@ function Filters() {
       )}
       {layer === "quests" && <SearchBox label="Search quests" />}
       <FogToggle />
+      <CustomMarkersToggle />
     </div>
   );
 }

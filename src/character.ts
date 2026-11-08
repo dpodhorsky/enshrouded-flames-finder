@@ -25,6 +25,8 @@ export type Character = {
   readonly inventory: readonly ItemRecord[];
   // The backpack extension rows.
   readonly extra: readonly ItemRecord[];
+  // Map markers the player placed. Missing in characters stored by earlier versions of the page.
+  readonly markers?: readonly CustomMarker[];
 };
 
 export const equipmentPositions = [
@@ -98,6 +100,54 @@ export function readCharacterName(payload: Uint8Array): string {
   }
   reader.need(length);
   return new TextDecoder().decode(payload.subarray(reader.offset, reader.offset + length));
+}
+
+// A map marker the player placed. Positions are in metres like the rest of the page.
+export type CustomMarker = {
+  readonly east: number;
+  readonly north: number;
+  // The game's marker type id: one of the ten custom marker icons (src/custom-markers.ts).
+  readonly icon: number;
+  // The colour scheme, 0–7 in the order the game's map menu offers them.
+  readonly color: number;
+  readonly label: string;
+};
+
+// The custom markers follow the name in character_data after 50 bytes of other data: a u32 count, then per marker three
+// signed 32.32 fixed-point numbers (east, height, north), a u8 colour, a u32 marker type id, a u8 label length and the
+// label as UTF-8. Returns [] for a layout it does not recognise.
+const markersOffsetAfterName = 50;
+const maxMarkers = 1000;
+
+export function readCustomMarkers(payload: Uint8Array): CustomMarker[] {
+  try {
+    const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+    let offset = 9 + view.getUint32(5, true) + markersOffsetAfterName;
+    const count = view.getUint32(offset, true);
+    offset += 4;
+    if (count > maxMarkers) {
+      return [];
+    }
+
+    const fixed = (at: number) => Number(view.getBigInt64(at, true)) / 2 ** 32;
+    const markers: CustomMarker[] = [];
+    for (let index = 0; index < count; index++) {
+      const east = fixed(offset);
+      const north = fixed(offset + 16);
+      const color = view.getUint8(offset + 24);
+      const icon = view.getUint32(offset + 25, true);
+      const labelLength = view.getUint8(offset + 29);
+      if (!(east >= 0 && east <= 10240 && north >= 0 && north <= 10240) || color > 7 || offset + 30 + labelLength > payload.length) {
+        return [];
+      }
+      const label = new TextDecoder("utf-8", { fatal: true }).decode(payload.subarray(offset + 30, offset + 30 + labelLength));
+      markers.push({ east, north, icon, color, label });
+      offset += 30 + labelLength;
+    }
+    return markers;
+  } catch {
+    return [];
+  }
 }
 
 // Optional item fields, in flag bit order: bit 0 item level (1 byte), bit 1 durability and max durability (2 × u32),

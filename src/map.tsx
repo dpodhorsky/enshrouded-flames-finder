@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 
 import flameIconUrl from "./assets/flame-shrine.png";
 import mapImageUrl from "./assets/map.webp";
+import { CustomMarkers } from "./custom-markers.tsx";
 import { locationsOfRegion, regions } from "./locations.ts";
 import { LoreSymbols } from "./lore-icon.tsx";
 import { usePlaceCanvas } from "./place-canvas.tsx";
@@ -512,6 +513,7 @@ export function MapView() {
         <image href={mapImageUrl} x={0} y={0} width={mapSize} height={mapSize} preserveAspectRatio="none" />
         {fogUrl.value && showFog.value && <image class="fog" href={fogUrl.value} x={0} y={0} width={mapSize} height={mapSize} preserveAspectRatio="none" />}
         <RegionLabels />
+        <CustomMarkers />
         <Markers hover={hover} moved={moved} />
       </svg>
       <canvas ref={canvasRef} class="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true" />

@@ -19,6 +19,8 @@ More information: [Enshrouded save management](https://saraserenity.net/enshroud
 
 The **Places** layer shows about 4,600 points of interest. 364 of them come from the game's own map markers, under **Discoveries**: villages, ruins, dungeons, lairs, Flame sites and hints. A save tells whether the character has discovered each one; discovered ones fade on the map, and **Missing** lists only the others. The rest come from the community map, in 40 types: Ancient Spires, Vaults, Night Sanctums, dungeons, villages, camps, bosses, chests, collectibles, secret doors and more. The save cannot tell which of those you have found. Pick the types under **Types**. Chests, collectibles, bosses, enemy camps and Shroud Roots start hidden. Zoomed out, nearby places are thinned to one per spot, so zoom in to see them all.
 
+A loaded character also brings its own **map markers**: the ones you placed in game, with the game's icons, colours and labels (hover a marker for its label). Turn them off with **Show my map markers**.
+
 The **Quests** layer lists the journal's 188 quests by who gives them, with each quest's steps. With a save loaded, each quest shows as done, in progress or not started, and each step as done, current or not reached. Most quests are kept in both the world and the character save, but some only in the world save, so load both for a full count. Some steps ask for an NPC's state, which saves do not hold; for those the page goes by whether the journal shows the next step.
 
 The **character button** in the top bar (it shows the name and level once a save is loaded) opens the character: level and XP, the unlocked skills by name with their ranks, the equipped gear and what the character carries, with item names.
@@ -43,7 +45,7 @@ bun scripts/import-game.ts <unpacked folder> <Enshrouded folder> --check <charac
 bun run format
 ```
 
-`--check` prints how the data reads a character and a world save. The page takes each lore page's region and hint from the community data above, by the page's title and position.
+`--check` prints how the data reads a character and a world save. The custom map marker icons in `src/assets/markers/` and their colours (`src/custom-markers.tsx`) come from the game files too: the `MapMarkerRegistryResource`, the marker textures and `menu.map.customMarkers.colors` of the UI bundle. The page takes each lore page's region and hint from the community data above, by the page's title and position.
 
 ## Development
 
