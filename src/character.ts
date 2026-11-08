@@ -113,16 +113,21 @@ export type CustomMarker = {
   readonly label: string;
 };
 
-// The custom markers follow the name in character_data after 50 bytes of other data: a u32 count, then per marker three
-// signed 32.32 fixed-point numbers (east, height, north), a u8 colour, a u32 marker type id, a u8 label length and the
-// label as UTF-8. Returns [] for a layout it does not recognise.
-const markersOffsetAfterName = 50;
+// After the name, character_data has 49 bytes of other data and a byte of section flags. Bit 0 marks the custom marker
+// section, which comes next: a u32 count, then per marker three signed 32.32 fixed-point numbers (east, height, north), a
+// u8 colour, a u32 marker type id, a u8 label length and the label as UTF-8. A character that never placed a marker has no
+// section. Returns [] for that, and for a layout it does not recognise.
+const flagsOffsetAfterName = 49;
 const maxMarkers = 1000;
 
 export function readCustomMarkers(payload: Uint8Array): CustomMarker[] {
   try {
     const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
-    let offset = 9 + view.getUint32(5, true) + markersOffsetAfterName;
+    const flagsAt = 9 + view.getUint32(5, true) + flagsOffsetAfterName;
+    if (!(view.getUint8(flagsAt) & 1)) {
+      return [];
+    }
+    let offset = flagsAt + 1;
     const count = view.getUint32(offset, true);
     offset += 4;
     if (count > maxMarkers) {

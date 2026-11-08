@@ -133,8 +133,12 @@ describe("custom markers", () => {
   // character_data as the game writes it: a byte, a storage tag, the name, 50 bytes of other data, then the markers.
   function characterData(name: string, markers: { east: number; height: number; north: number; color: number; icon: number; label: string }[]) {
     const nameBytes = new TextEncoder().encode(name);
-    const parts: number[] = [2, 0, 0, 0, 0, ...new Uint8Array(new Uint32Array([nameBytes.length]).buffer), ...nameBytes, ...new Array(50).fill(0)];
-    parts.push(...new Uint8Array(new Uint32Array([markers.length]).buffer));
+    const parts: number[] = [2, 0, 0, 0, 0, ...new Uint8Array(new Uint32Array([nameBytes.length]).buffer), ...nameBytes, ...new Array(49).fill(0)];
+    if (markers.length === 0) {
+      // No marker section: the flags byte is clear and 4 more bytes end the data.
+      return new Uint8Array([...parts, 0, 0xf9, 0xdb, 0x9b, 0x0d]);
+    }
+    parts.push(1, ...new Uint8Array(new Uint32Array([markers.length]).buffer));
     for (const marker of markers) {
       const fixed = new DataView(new ArrayBuffer(24));
       fixed.setBigInt64(0, BigInt(Math.round(marker.east * 2 ** 32)), true);
@@ -166,6 +170,8 @@ describe("custom markers", () => {
     const data = characterData("Lando", [{ east: 4000, height: 0, north: 3000, color: 1, icon: 0x5eba3084, label: "x" }]);
     data[9 + 5 + 50] = 0xff; // a count far beyond the data
     expect(readCustomMarkers(data)).toEqual([]);
+    // A character that never placed a marker.
+    expect(readCustomMarkers(characterData("Bugged?", []))).toEqual([]);
   });
 
   test("EveryColourHasAScheme", () => {
