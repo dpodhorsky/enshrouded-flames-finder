@@ -23,6 +23,10 @@
 // - A lore object's template has a keen::ecs::LoreReading component whose entryName is the page's journal name tag.
 // - A map marker's template has a keen::ecs::MapMarker component, and keen::ecs::RuntimeMapMarkerUnlockRequirements when the
 //   marker is unlocked by knowledge (hint, visible and completed states).
+// - Knowledge is set by: NPC dialog lines (keen::ecs::NpcDialog, knowledgeUnlockOperations per line), kills
+//   (keen::ecs::KnowledgeTriggerOnKill), collection showcases (keen::ecs::TriggerCollectionCompletionKnowledge), other template
+//   components with knowledgeUnlockOperations, placed objects (keen::ecs::SceneKnowledgeTrigger in a chunk's spawn data, context
+//   "Interact" or none) and picking up items (an item's id is also its knowledge id).
 import { closeSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
@@ -144,7 +148,7 @@ type Requirement =
   | { readonly all: readonly Requirement[] }
   | { readonly any: readonly Requirement[] }
   | { readonly not: Requirement }
-  | { readonly other: string };
+  | { readonly other: string; readonly detail?: string };
 
 const leaf = (id: number, extra: object): Requirement =>
   ({ k: id, ...extra, ...(worldIds.has(id) && !playerIds.has(id) ? { world: true as const } : {}) }) as Requirement;
@@ -169,7 +173,10 @@ function requirement(query: Json, depth = 0): Requirement | null {
         throw new Error(`Query ${named.name} nests too deep.`);
       }
       const parts = named.actions.map((action: Json): Requirement => {
-        const inner = action.type === "Knowledge" || action.type === "Query" ? requirement(action.query, depth + 1) : { other: action.type };
+        const inner =
+          action.type === "Knowledge" || action.type === "Query"
+            ? requirement(action.query, depth + 1)
+            : { other: action.type, ...(action.name ? { detail: action.name } : {}) };
         const result = inner ?? { other: "empty" };
         return action.invertResult ? { not: result } : result;
       });
@@ -188,7 +195,7 @@ type Template = { readonly name: string; readonly components: Map<string, Json> 
 const templates = new Map<string, Template>();
 for (const file of readdirSync(join(unpacked, "TemplateResource"))) {
   const raw = readFileSync(join(unpacked, "TemplateResource", file), "utf8");
-  if (!raw.includes('"keen::ecs::LoreReading"') && !raw.includes('"keen::ecs::MapMarker"')) {
+  if (!raw.includes('"keen::ecs::LoreReading"') && !raw.includes('"keen::ecs::MapMarker"') && !raw.includes("nowledgeUnlockOperation")) {
     continue;
   }
   const template = JSON.parse(raw);
@@ -198,17 +205,24 @@ for (const file of readdirSync(join(unpacked, "TemplateResource"))) {
   });
 }
 
-type Placed = { readonly template: string; readonly east: number; readonly north: number; readonly altitude: number; readonly triggers: number[] };
+type Placed = {
+  readonly template: string;
+  readonly east: number;
+  readonly north: number;
+  readonly altitude: number;
+  // Knowledge the object sets when used ("Interact"); the lore pages use these.
+  readonly triggers: number[];
+  // All knowledge the object sets, with the context: "Interact", or "Invalid" for its default action (opened, reached, …).
+  readonly sceneTriggers: { readonly id: number; readonly context: string }[];
+};
 const placed: Placed[] = [];
 for (const file of readdirSync(join(unpacked, "SceneEntityChunkResource")).sort()) {
   const chunk = JSON.parse(readFileSync(join(unpacked, "SceneEntityChunkResource", file), "utf8"));
   const spawn = chunk.spawnData;
   chunk.entities.forEach((entity: Json, index: number) => {
     const template: string = chunk.templates[entity.templateIndex];
-    if (!templates.has(template)) {
-      return;
-    }
     const triggers: number[] = [];
+    const sceneTriggers: { id: number; context: string }[] = [];
     const entry = spawn.entries[index];
     if (entry) {
       const count: number = spawn.indices[entry.spawnIndexStart];
@@ -216,12 +230,19 @@ for (const file of readdirSync(join(unpacked, "SceneEntityChunkResource")).sort(
       for (const component of spawn.components.slice(first, first + count)) {
         if (component.$type === "keen::ecs::SceneKnowledgeTrigger") {
           for (const operation of component.$value.knowledgeUnlockOperations) {
+            const id: number = operation.unlockOperation.knowledgeId.id.value;
             if (operation.context !== "Invalid") {
-              triggers.push(operation.unlockOperation.knowledgeId.id.value);
+              triggers.push(id);
+            }
+            if (id) {
+              sceneTriggers.push({ id, context: operation.context });
             }
           }
         }
       }
+    }
+    if (!templates.has(template) && !sceneTriggers.length) {
+      return;
     }
     const t = entity.transform;
     placed.push({
@@ -230,6 +251,7 @@ for (const file of readdirSync(join(unpacked, "SceneEntityChunkResource")).sort(
       north: Math.round(t.positionZ1 + t.positionZ0 / 65536),
       altitude: Math.round(t.positionY1 + t.positionY0 / 65536),
       triggers,
+      sceneTriggers,
     });
   });
 }
@@ -384,6 +406,219 @@ const quests = journal.quests.map((quest: Json) => ({
   })),
 }));
 
+// --- Knowledge sources -----------------------------------------------------------------------------------------------------
+// What sets each knowledge id that a quest step tests, so the page can say "after talking to Galen Yager" instead of an id.
+
+type SourceKind = "talk" | "kill" | "read" | "open" | "pickup" | "soul" | "reach" | "use" | "object" | "collection" | "item" | "craft" | "place" | "when";
+type Source = {
+  kind: SourceKind;
+  rule?: Requirement;
+  what: string;
+  line?: string;
+  near?: string;
+  at?: readonly [number, number];
+};
+
+const leafIds = (required: Requirement | null): number[] =>
+  !required || "other" in required
+    ? []
+    : "not" in required
+      ? leafIds(required.not)
+      : "all" in required
+        ? required.all.flatMap(leafIds)
+        : "any" in required
+          ? required.any.flatMap(leafIds)
+          : [required.k];
+const questIds = new Set<number>(quests.flatMap((quest: Json) => quest.steps.flatMap((step: Json) => [...leafIds(step.shown), ...leafIds(step.done)])));
+
+// Template names for placed objects whose template sets nothing itself (a chest whose placement carries the trigger).
+const templateFiles = new Map(readdirSync(join(unpacked, "TemplateResource")).map((file) => [file.slice(0, 36), file]));
+const otherTemplates = new Map<string, Template>();
+const templateOf = (guid: string): Template | undefined => {
+  const known = templates.get(guid) ?? otherTemplates.get(guid);
+  if (known || !templateFiles.has(guid)) {
+    return known;
+  }
+  const template = JSON.parse(readFileSync(join(unpacked, "TemplateResource", templateFiles.get(guid)!), "utf8"));
+  const loaded = { name: template.name, components: new Map<string, Json>(template.components.map((component: Json) => [component.$type, component.$value])) };
+  otherTemplates.set(guid, loaded);
+  return loaded;
+};
+
+// "Prop_Chest_Wood_Small_01" -> "Chest Wood Small": a fallback when a template has no English name.
+const readableTemplateName = (name: string) =>
+  name
+    .replace(/^(Prop|NPC|Enemy|Animal|HelperEntity|Craft|8kMapLabel)_/i, "")
+    .replace(/_\d+[a-z]?$/i, "")
+    .replace(/_/g, " ")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .trim();
+const nameOf = (template: Template) =>
+  text(guidTag(template.components.get("keen::ecs::LocaTagComponent")?.locaTag)) ||
+  text(template.components.get("keen::ecs::NpcDialog")?.dialogResource?.headline?.value) ||
+  readableTemplateName(template.name);
+
+// The name of the nearest named map location within 400 m.
+const nearestLocation = (east: number, north: number) => {
+  let best = "";
+  let bestDistance = 400;
+  for (const location of mapLocations) {
+    const distance = Math.hypot(location.east - east, location.north - north);
+    if (distance < bestDistance && !/_|MapLabel/.test(location.name)) {
+      bestDistance = distance;
+      best = location.name;
+    }
+  }
+  return best;
+};
+
+// What a placed object or template does, in words. `used` is true when the trigger fires on interaction.
+function describeObject(template: Template, used: boolean): { kind: SourceKind; what: string } {
+  const name = template.name;
+  const reading = template.components.get("keen::ecs::LoreReading");
+  const page = reading ? pageByName.get(guidTag(reading.entryName)) : undefined;
+  if (page) {
+    return { kind: "read", what: page.title };
+  }
+  if (/Loot_?Chest/i.test(name)) {
+    return { kind: "open", what: /gold/i.test(name) ? "gold chest" : /silver/i.test(name) ? "silver chest" : "chest" };
+  }
+  if (/Loot_?Pickup/i.test(name)) {
+    const rest = name.replace(/^.*Loot_?Pickup_/i, "").replace(/^(NPC_[A-Za-z]+|Collections(_[A-Za-z]+?(?=_|$))?)_/i, "");
+    return { kind: "pickup", what: readableTemplateName(rest) };
+  }
+  if (/soul_?knowledge|spawn_?Statue/i.test(name)) {
+    return { kind: "soul", what: "a Lost Villager Soul" };
+  }
+  if (/^Spawnpoint_POI_(Enemy|Wildbeast)/i.test(name)) {
+    const enemy = readableTemplateName(name.replace(/^Spawnpoint_POI_(Enemy|Wildbeast)_/i, ""))
+      .replace(/\b(Boss )?Health ?Bar\b|\bhealthbar\b|\bPatrol\b|\bfog\b|\blore\b.*$/gi, "")
+      .replace(/\bT\d\b/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    return { kind: "kill", what: enemy };
+  }
+  const english =
+    text(guidTag(template.components.get("keen::ecs::LocaTagComponent")?.locaTag)) || text(guidTag(template.components.get("keen::ecs::MapMarker")?.markerId));
+  if (english) {
+    return { kind: used ? "use" : "reach", what: english };
+  }
+  const readable = readableTemplateName(name)
+    .replace(/\b(general |)Placeholder( Map Marker)?\b|\bno UI\b|\bplaceholder\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return { kind: used ? "use" : /zone|trigger/i.test(name) ? "reach" : "object", what: readable };
+}
+
+// "Lizardpeople_Drak04_Mage_Patrol" -> "Drak Mage"
+const enemyName = (template: Template) =>
+  text(guidTag(template.components.get("keen::ecs::LocaTagComponent")?.locaTag)) ||
+  readableTemplateName(template.name)
+    .replace(/Lizardpeople Drak\d+/i, "Drak")
+    .replace(/\b(boss )?Health ?bar\b|\bPatrol\b|\bDungeon\d+\b|\blore\b.*$/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const sources = new Map<number, Source[]>();
+const addSource = (id: number, source: Source) => {
+  if (!questIds.has(id)) {
+    return;
+  }
+  const list = sources.get(id) ?? [];
+  if (!list.some((each) => each.kind === source.kind && each.what === source.what && each.line === source.line && each.near === source.near)) {
+    list.push(source);
+  }
+  sources.set(id, list);
+};
+const placeOf = (guid: string) => {
+  const object = placedByTemplate.get(guid)?.[0];
+  return object ? { near: nearestLocation(object.east, object.north) || undefined, at: [object.east, object.north] as const } : {};
+};
+const unlockIds = (operations: Json[] | undefined): number[] =>
+  (operations ?? []).map((operation: Json) => (operation.knowledgeId ?? operation.unlockOperation?.knowledgeId)?.id?.value).filter(Boolean);
+
+for (const [guid, template] of templates) {
+  const name = nameOf(template);
+  const dialog = template.components.get("keen::ecs::NpcDialog")?.dialogResource;
+  if (dialog) {
+    for (const lines of [dialog.initLines, dialog.transitionLines, dialog.farewellLines, dialog.dialogOptions]) {
+      for (const line of lines ?? []) {
+        const spoken = text(line.bodyTexts?.[0]?.value);
+        for (const id of unlockIds(line.knowledgeUnlockOperations)) {
+          addSource(id, { kind: "talk", what: name, line: spoken.length > 90 ? `${spoken.slice(0, 88).trimEnd()}…` : spoken || undefined, ...placeOf(guid) });
+        }
+      }
+    }
+  }
+  const kill = template.components.get("keen::ecs::KnowledgeTriggerOnKill");
+  for (const id of unlockIds(kill ? [kill.knowledgeUnlockOperation] : [])) {
+    addSource(id, { kind: "kill", what: enemyName(template), ...placeOf(guid) });
+  }
+  const showcase = template.components.get("keen::ecs::TriggerCollectionCompletionKnowledge");
+  for (const id of unlockIds(showcase ? [showcase.completionKnowledgeUnlockOperation] : [])) {
+    addSource(id, { kind: "collection", what: name, ...placeOf(guid) });
+  }
+  for (const [type, component] of template.components) {
+    if (type === "keen::ecs::NpcDialog" || type === "keen::ecs::KnowledgeTriggerOnKill" || !component || typeof component !== "object") {
+      continue;
+    }
+    for (const id of unlockIds(component.knowledgeUnlockOperations)) {
+      addSource(id, { ...describeObject(template, false), ...placeOf(guid) });
+    }
+  }
+}
+
+for (const object of placed) {
+  for (const trigger of object.sceneTriggers) {
+    if (!questIds.has(trigger.id)) {
+      continue;
+    }
+    const template = templateOf(object.template);
+    addSource(trigger.id, {
+      ...(template ? describeObject(template, trigger.context === "Interact") : { kind: "object" as const, what: "an object" }),
+      near: nearestLocation(object.east, object.north) || undefined,
+      at: [object.east, object.north],
+    });
+  }
+}
+
+const itemNames = new Map<number, string>();
+for (const file of readdirSync(join(unpacked, "ItemInfo"))) {
+  const item = JSON.parse(readFileSync(join(unpacked, "ItemInfo", file), "utf8"));
+  const name = text(guidTag(item.name)) || readableTemplateName(item.debugName);
+  itemNames.set(item.itemId.value, name);
+  if (questIds.has(item.itemId.value)) {
+    addSource(item.itemId.value, { kind: "item", what: name });
+  }
+  // Placing or using the item (its use sequence) sets knowledge, such as placing the Loom.
+  for (const sequence of [item.sequences].flat(2).filter(Boolean)) {
+    for (const id of unlockIds([sequence.knowledgeUnlockOperation].filter(Boolean))) {
+      addSource(id, { kind: "place", what: name });
+    }
+  }
+}
+
+// A recipe's id is also the knowledge id of having crafted it.
+for (const recipe of single("RecipeRegistryResource").recipes) {
+  const output = recipe.output.map((stack: Json) => itemNames.get(stack.item.value)).find(Boolean);
+  if (output) {
+    addSource(recipe.recipeId.value, { kind: "craft", what: output });
+  }
+}
+
+// The game sets some knowledge by itself once a rule holds ("has all three shards").
+{
+  const triggers = single("GameKnowledgeQueryTriggerResource");
+  for (const entry of [...triggers.worldQueries, ...triggers.playerQueries]) {
+    const rule = entry.query ? requirement(entry.query) : null;
+    for (const id of unlockIds(entry.unlockKnowledge)) {
+      if (rule) {
+        addSource(id, { kind: "when", what: "", rule });
+      }
+    }
+  }
+}
+
 // --- Output ---------------------------------------------------------------------------------------------------------------
 
 const version = (() => {
@@ -402,7 +637,8 @@ const requirementType = `// A requirement as a save answers it:
 // - { k, flag }: the save knows id k and its value has every bit of flag (a Bool is the flag 1);
 // - { k, count: [op, n] }: the value of k compared with n;
 // - all / any / not combine requirements;
-// - { other }: a check the save's knowledge cannot answer, such as the Mother Flame level or an NPC's state.
+// - { other, detail }: a check the save's knowledge cannot answer, such as the Mother Flame level or an NPC's state; detail is the
+//   game's own name for the check, such as "NPC_barber_sheltered_state".
 // "world" marks ids only a world save's world_knowledge holds. Most quest ids are in both registries: the world save holds them
 // for the world, and the character save for the players who were there.
 export type Requirement =
@@ -411,7 +647,7 @@ export type Requirement =
   | { readonly all: readonly Requirement[] }
   | { readonly any: readonly Requirement[] }
   | { readonly not: Requirement }
-  | { readonly other: string };
+  | { readonly other: string; readonly detail?: string };
 `;
 
 const outDir = new URL("../src/game/", import.meta.url);
@@ -499,6 +735,81 @@ export const quests: readonly Quest[] = ${json(quests)};
 `,
 );
 
+// Lore pages that a quest step tests: reading the page shows the step ("shows") or completes it ("completes").
+const questLore = new Map<number, { quest: string; step: string; role: "shows" | "completes" }[]>();
+{
+  const loreIds = new Set(gamePages.map((page) => page.knowledgeId));
+  for (const quest of quests) {
+    for (const step of quest.steps) {
+      for (const [role, rule] of [
+        ["shows", step.shown],
+        ["completes", step.done],
+      ] as const) {
+        for (const id of new Set(leafIds(rule))) {
+          if (loreIds.has(id)) {
+            questLore.set(id, [...(questLore.get(id) ?? []), { quest: quest.name, step: step.name, role }]);
+          }
+        }
+      }
+    }
+  }
+}
+write(
+  "quest-lore.ts",
+  `${header("Lore pages that quest steps test: reading the page shows a step, or completes it.")}
+export type QuestLoreLink = { readonly quest: string; readonly step: string; readonly role: "shows" | "completes" };
+
+export const questLore: Readonly<Record<number, readonly QuestLoreLink[]>> = ${json(Object.fromEntries([...questLore].sort((a, b) => a[0] - b[0])))};
+`,
+);
+
+write(
+  "knowledge-sources.ts",
+  `${header("What sets the knowledge ids that quest steps test: NPC dialog lines, kills, used or reached objects, collections, items.")}
+// kind: "talk" an NPC dialog line sets it (line: what the NPC says); "kill" defeating an enemy; "read" reading a lore page;
+// "open" opening a chest; "pickup" picking something up; "soul" freeing a Lost Villager Soul; "reach" reaching or discovering a
+// place; "use" using a placed object; "object" another object's default action; "collection" completing a showcase; "item"
+// finding the item; "craft" crafting it; "place" placing or using the item; "when" the game sets it once \`rule\` holds.
+// near: the nearest named map location within 400 m; at: [east, north] of one such object.
+import type { Requirement } from "./requirement.ts";
+
+export type KnowledgeSource = {
+  readonly kind:
+    | "talk"
+    | "kill"
+    | "read"
+    | "open"
+    | "pickup"
+    | "soul"
+    | "reach"
+    | "use"
+    | "object"
+    | "collection"
+    | "item"
+    | "craft"
+    | "place"
+    | "when";
+  readonly rule?: Requirement;
+  readonly what: string;
+  readonly line?: string;
+  readonly near?: string;
+  readonly at?: readonly [number, number];
+};
+
+export const knowledgeSources: Readonly<Record<number, readonly KnowledgeSource[]>> = ${json(Object.fromEntries([...sources].sort((a, b) => a[0] - b[0])))};
+`,
+);
+
+{
+  const lore = new Set(gamePages.map((page) => page.knowledgeId));
+  const unexplained = [...questIds].filter((id) => !sources.has(id) && !lore.has(id));
+  console.log(
+    `Quest knowledge ids: ${questIds.size}; explained by lore pages ${[...questIds].filter((id) => lore.has(id)).length}, by other sources ${sources.size}, unexplained ${unexplained.length}.`,
+  );
+  console.log(
+    `Sources by kind: ${JSON.stringify(Object.fromEntries([...Map.groupBy([...sources.values()].flat(), (source) => source.kind)].map(([kind, list]) => [kind, list.length])))}.`,
+  );
+}
 console.log(
   `${skills.length} skills, ${gamePages.length} lore pages (${gamePages.filter((page) => page.places.length).length} placed), ${mapLocations.length} map locations, ${quests.length} quests.`,
 );

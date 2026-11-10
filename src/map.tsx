@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import flameIconUrl from "./assets/flame-shrine.png";
 import mapImageUrl from "./assets/map.webp";
 import { CustomMarkers } from "./custom-markers.tsx";
+import { questLore } from "./game/quest-lore.ts";
 import { locationsOfRegion, regions } from "./locations.ts";
 import { LoreSymbols } from "./lore-icon.tsx";
 import { usePlaceCanvas } from "./place-canvas.tsx";
@@ -322,7 +323,14 @@ function Markers({ hover, moved }: { hover: Signal<Hover | null>; moved: RefObje
             <g transform={markerScale}>
               <circle class="ring" r={size / 2 + 3} />
               {pin.layer === "lore" ? (
-                <use class="shape" href={state === "found" ? "#lore-page-found" : "#lore-page"} x={-size / 2} y={-size / 2} width={size} height={size} />
+                <use
+                  class="shape"
+                  href={`#lore-page${pin.knowledgeId !== null && questLore[pin.knowledgeId] ? "-quest" : ""}${state === "found" ? "-found" : ""}`}
+                  x={-size / 2}
+                  y={-size / 2}
+                  width={size}
+                  height={size}
+                />
               ) : pin.place ? (
                 <image class="shape place-icon" href={pin.place.iconUrl} x={-size / 2} y={-size / 2} width={size} height={size} />
               ) : (
@@ -367,6 +375,16 @@ function PinDetails({ pin }: { pin: Pin }) {
         </p>
       )}
       {page.hint && <p>{page.hint}</p>}
+      {page.knowledgeId !== null && questLore[page.knowledgeId] && (
+        <ul class="grid gap-0.5">
+          {questLore[page.knowledgeId]!.map((link, index) => (
+            <li key={index}>
+              <span class="font-semibold text-(--warning)">!</span> {link.role === "shows" ? "Starts or advances" : "Completes"}{" "}
+              <span class="text-primary">{link.quest}</span>: {link.step}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { useEffect } from "preact/hooks";
 import flameIconUrl from "./assets/flame-shrine.png";
 import { CharacterButton } from "./character-panel.tsx";
 import { showCustomMarkers } from "./custom-markers.tsx";
+import { questLore } from "./game/quest-lore.ts";
 import { type LocationKind } from "./locations.ts";
 import { LoreIcon } from "./lore-icon.tsx";
 import { MapView } from "./map.tsx";
@@ -195,7 +196,7 @@ function PinIcon({ pin, found }: { pin: Pin; found: boolean }) {
   if (pin.layer === "lore") {
     return (
       <svg class={`size-4.5 shrink-0 ${found ? "opacity-60" : ""}`} viewBox="-12 -12 24 24" aria-hidden="true">
-        <LoreIcon found={found} />
+        <LoreIcon found={found} quest={pin.knowledgeId !== null && Boolean(questLore[pin.knowledgeId])} />
       </svg>
     );
   }

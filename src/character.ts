@@ -191,8 +191,8 @@ function readItem(reader: Reader): ItemRecord {
   return { slot, itemId, count, level, durability, rarity };
 }
 
-// Status entry: u32 effect, two u64, a u16 field mask, then one field per mask bit. Only bits 1–4 have known sizes.
-const statusFieldSizes: Record<number, number> = { 1: 4, 2: 4, 3: 1, 4: 8 };
+// Status entry: u32 effect, two u64, a u16 field mask, then one field per mask bit. Only bits 0–4 have known sizes.
+const statusFieldSizes: Record<number, number> = { 0: 1, 1: 4, 2: 4, 3: 1, 4: 8 };
 
 function skipStatus(reader: Reader) {
   reader.skip(4 + 8 + 8);
@@ -222,6 +222,15 @@ const maxSkills = 400;
 // player_character: a 58-byte prefix, u32 level, u32 experience, u32 skill count, skills (u32 id, u8 rank), the status list,
 // the Equipped mask and records, one u16 per set mask bit 16–18, the inventory header [05, n2, x, n3], n2 inventory records and
 // n3 extension records.
+// The level alone, which comes before anything whose layout can change.
+export function readLevel(payload: Uint8Array): number | null {
+  if (payload.length < levelOffset + 4) {
+    return null;
+  }
+  const level = new DataView(payload.buffer, payload.byteOffset, payload.byteLength).getUint32(levelOffset, true);
+  return level >= 1 && level <= 100 ? level : null;
+}
+
 export function readPlayerCharacter(payload: Uint8Array): Omit<Character, "name"> {
   const reader = new Reader(payload, levelOffset);
   const level = reader.u32();

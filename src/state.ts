@@ -1,6 +1,6 @@
 import { batch, computed, signal } from "@preact/signals";
 
-import { readCharacterName, readCustomMarkers, readPlayerCharacter, type Character, type ItemRecord } from "./character.ts";
+import { readCharacterName, readCustomMarkers, readLevel, readPlayerCharacter, type Character, type ItemRecord } from "./character.ts";
 import type { Requirement } from "./game/requirement.ts";
 import { journalLorePages, loreCategories } from "./journal-lore.ts";
 import { orderedLocations, shortName, type LocationKind } from "./locations.ts";
@@ -227,6 +227,88 @@ export const knowledge = signal<Knowledge | null>(storedKnowledge?.knowledge ?? 
 export const knowledgeIsCurrent = signal(storedKnowledge?.current ?? false);
 export const worldKnowledge = signal<Knowledge | null>(readStoredPairs(worldStorageKey));
 export const worldName = signal(readStoredText(worldNameStorageKey) ?? "");
+
+// Every character loaded, so the Quests tab can compare them. The character loaded last on its own (or first, when several load
+// at once) is also the active one that the map, the fog and the character panel show. Stored as { key, file, name, level, pairs }.
+export type SavedCharacter = {
+  readonly key: string;
+  readonly file: string;
+  readonly name: string;
+  readonly level: number | null;
+  readonly knowledge: Knowledge;
+};
+const charactersStorageKey = "characters";
+
+function readStoredCharacters(): SavedCharacter[] {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(charactersStorageKey) ?? "null");
+    if (Array.isArray(stored)) {
+      return stored.flatMap((entry) =>
+        entry && typeof entry.key === "string" && Array.isArray(entry.pairs)
+          ? [
+              {
+                key: entry.key,
+                file: String(entry.file ?? ""),
+                name: String(entry.name ?? "Character"),
+                level: typeof entry.level === "number" ? entry.level : null,
+                knowledge: new Map<number, number>(entry.pairs),
+              },
+            ]
+          : [],
+      );
+    }
+  } catch {
+    // As for the other stored data.
+  }
+  return [];
+}
+
+export const savedCharacters = signal<readonly SavedCharacter[]>(readStoredCharacters());
+
+function storeCharacters(list: readonly SavedCharacter[]) {
+  store(() =>
+    localStorage.setItem(
+      charactersStorageKey,
+      JSON.stringify(list.map(({ key, file, name, level, knowledge: known }) => ({ key, file, name, level, pairs: [...known] }))),
+    ),
+  );
+}
+
+// The name and level, read on their own: they come first, so they read even when the rest of the character does not.
+function nameAndLevel(save: Uint8Array) {
+  let name: string | null = null;
+  let level: number | null = null;
+  try {
+    const data = readBlock(save, "character_data");
+    name = data ? readCharacterName(data) : null;
+  } catch {
+    // Unknown layout: the file name stands in.
+  }
+  try {
+    const player = readBlock(save, "player_character");
+    level = player ? readLevel(player) : null;
+  } catch {
+    // As above.
+  }
+  return { name, level };
+}
+
+// A character read from a save, added to the list or replacing the entry from the same file.
+function rememberCharacter(file: string, known: Knowledge, save: Uint8Array) {
+  const { name, level } = nameAndLevel(save);
+  const entry: SavedCharacter = { key: file, file, name: name ?? file.replace(/\.ksd$/i, ""), level, knowledge: known };
+  const list = [...savedCharacters.peek().filter((each) => each.key !== entry.key), entry].toSorted((a, b) =>
+    a.file.localeCompare(b.file, "en", { numeric: true }),
+  );
+  savedCharacters.value = list;
+  storeCharacters(list);
+}
+
+export function forgetCharacter(key: string) {
+  const list = savedCharacters.peek().filter((each) => each.key !== key);
+  savedCharacters.value = list;
+  storeCharacters(list);
+}
 export const hasSave = computed(() => knowledge.value !== null);
 export const fogUrl = signal<string | null>(storedKnowledge ? readStoredText(fogStorageKey) : null);
 export const character = signal<Character | null>(storedKnowledge ? readStoredCharacter() : null);
@@ -344,11 +426,12 @@ function store(write: () => void) {
   }
 }
 
-function loadCharacterSave(save: Uint8Array) {
+function loadCharacterSave(save: Uint8Array, file: string) {
   const known = readKnowledge(save);
   const grid = readFog(save);
   const fog = grid ? fogImage(grid) : null;
   const read = readCharacter(save);
+  rememberCharacter(file, known, save);
 
   batch(() => {
     knowledge.value = known;
@@ -403,10 +486,14 @@ export async function loadSaves(files: readonly File[]) {
       throw new Error(`${unknown.name} holds neither character nor world knowledge. Select characterN.ksd, and worldN.ksd for world quests.`);
     }
 
-    const characterSave = saves.find((_, index) => kinds[index] === "character");
+    const characterSaves = saves.filter((_, index) => kinds[index] === "character");
     const worldSave = saves.find((_, index) => kinds[index] === "world");
-    if (characterSave) {
-      loadCharacterSave(characterSave.bytes);
+    // Every character is remembered for the Quests tab; the first one becomes the active character.
+    for (const extra of characterSaves.slice(1)) {
+      rememberCharacter(extra.name, readKnowledge(extra.bytes), extra.bytes);
+    }
+    if (characterSaves[0]) {
+      loadCharacterSave(characterSaves[0].bytes, characterSaves[0].name);
     }
     if (worldSave) {
       loadWorldSave(worldSave.bytes, worldSave.name);
@@ -425,10 +512,19 @@ export function forgetSave() {
     fogUrl.value = null;
     character.value = null;
     characterError.value = "";
+    savedCharacters.value = [];
   });
 
   store(() => {
-    for (const key of [knowledgeStorageKey, worldStorageKey, worldNameStorageKey, fogStorageKey, characterStorageKey, ...legacyStorageKeys]) {
+    for (const key of [
+      knowledgeStorageKey,
+      worldStorageKey,
+      worldNameStorageKey,
+      fogStorageKey,
+      characterStorageKey,
+      charactersStorageKey,
+      ...legacyStorageKeys,
+    ]) {
       localStorage.removeItem(key);
     }
   });

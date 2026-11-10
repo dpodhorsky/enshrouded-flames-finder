@@ -21,7 +21,9 @@ The **Places** layer shows about 4,600 points of interest. 364 of them come from
 
 A loaded character also brings its own **map markers**: the ones you placed in game, with the game's icons, colours and labels (hover a marker for its label). Turn them off with **Show my map markers**.
 
-The **Quests** layer lists the journal's 188 quests by who gives them, with each quest's steps. With a save loaded, each quest shows as done, in progress or not started, and each step as done, current or not reached. Most quests are kept in both the world and the character save, but some only in the world save, so load both for a full count. Some steps ask for an NPC's state, which saves do not hold; for those the page goes by whether the journal shows the next step.
+The **Quests** layer lists the journal's 188 quests by who gives them. Open a quest to see its steps, and under each step what makes it appear and what completes it, in plain words: "Read "I Buried It Deep"", "Talk to Balthazar", "Open the gold chest near Farmer Treasure Hint", "Craft Spiritual Cane". These come from the game files: what each knowledge id that a step tests is set by (a lore page, an NPC's dialog line, a kill, an object you open or reach, an item you find, craft or place). About 4% of them have no source in the files and show as "an event the game files do not name"; some steps also check an NPC's state, which saves do not hold. Load several character saves at once (select or drop them together) to compare characters: each quest then shows a dot per character, and each step a mark per character. Most quests are kept in both the world and the character save, but some only in the world save, so load the world save too for a full count.
+
+On the **Lore** layer, pages that start, advance or complete a quest step carry a "!" badge, and their details name the quest and step.
 
 The **character button** in the top bar (it shows the name and level once a save is loaded) opens the character: level and XP, the unlocked skills by name with their ranks, the equipped gear and what the character carries, with item names.
 
